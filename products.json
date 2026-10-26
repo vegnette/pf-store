@@ -1,0 +1,93 @@
+[
+  {
+    "id": 1,
+    "category": "watches",
+    "title": "Apple Watch S11 46mm",
+    "price": 2000,
+    "oldPrice": 3000,
+    "stock": 3,
+    "badges": ["hit"],
+    "desc_file": "./images/Watch 11/1.txt",
+    "images": [
+      "./images/Watch 11/1.jpg", "./images/Watch 11/2.jpg", "./images/Watch 11/3.jpg",
+      "./images/Watch 11/4.jpg", "./images/Watch 11/5.jpg", "./images/Watch 11/6.jpg"
+    ],
+    "gift_images": ["./images/Watch 11/gift.jpg"],
+    "gift_desc": "🎁 Ремешок Миланское плетение в подарок при покупке часов!"
+  },
+  {
+    "id": 2,
+    "category": "headphones",
+    "title": "AirPods Pro 3 LUX 2026",
+    "price": 2500,
+    "oldPrice": 3500,
+    "stock": 0,
+    "badges": ["hit"],
+    "desc_file": "./images/Pro3/1.txt",
+    "images": [
+      "./images/Pro3/1.jpg", "./images/Pro3/2.jpg", "./images/Pro3/3.jpg",
+      "./images/Pro3/4.jpg", "./images/Pro3/5.jpg", "./images/Pro3/6.jpg"
+    ],
+    "gift_images": ["./images/Pro3/gift.jpg"],
+    "gift_desc": "🎁 Кабель 60W в подарок к наушникам!"
+  },
+  {
+    "id": 3,
+    "category": "headphones",
+    "title": "AirPods 4 (ANC)",
+    "price": 2000,
+    "oldPrice": 2900,
+    "stock": 1,
+    "badges": ["new"],
+    "desc_file": "./images/4/1.txt",
+    "images": [
+      "./images/4/1.jpg", "./images/4/2.jpg", "./images/4/3.jpg",
+      "./images/4/4.jpg", "./images/4/5.jpg", "./images/4/6.jpg"
+    ],
+    "gift_images": ["./images/4/gift.jpg"],
+    "gift_desc": "🎁 Кабель 60W в подарок к наушникам!"
+  },
+  {
+    "id": 4,
+    "category": "headphones",
+    "title": "AirPods Pro 2",
+    "price": 2500,
+    "oldPrice": 3000,
+    "stock": 4,
+    "badges": [],
+    "desc_file": "./images/Pro2/1.txt",
+    "images": [
+      "./images/Pro2/1.jpg", "./images/Pro2/2.jpg", "./images/Pro2/3.jpg",
+      "./images/Pro2/4.jpg", "./images/Pro2/5.jpg", "./images/Pro2/6.jpg"
+    ],
+    "gift_images": ["./images/Pro2/gift.jpg"],
+    "gift_desc": "🎁 Кабель 60W в подарок к наушникам!"
+  },
+  {
+    "id": 5,
+    "category": "glasses",
+    "title": "Ray-Ban с камерой 4K",
+    "price": 5500,
+    "oldPrice": 7000,
+    "stock": 1,
+    "badges": ["hit"],
+    "desc_file": "./images/RayBan/1.txt",
+    "images": [
+      "./images/RayBan/1.jpg", "./images/RayBan/2.jpg", "./images/RayBan/3.jpg",
+      "./images/RayBan/4.jpg", "./images/RayBan/5.jpg", "./images/RayBan/6.jpg"
+    ]
+  },
+  {
+    "id": 6,
+    "category": "accessories",
+    "title": "Зарядка MagSafe",
+    "price": 690,
+    "stock": 0,
+    "badges": [],
+    "desc_file": "./images/Magsafe/1.txt",
+    "images": [
+      "./images/Magsafe/1.jpg", "./images/Magsafe/2.jpg", "./images/Magsafe/3.jpg",
+      "./images/Magsafe/4.jpg", "./images/Magsafe/5.jpg", "./images/Magsafe/6.jpg"
+    ]
+  }
+]

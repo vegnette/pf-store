@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#67E9D1">
+  <title>PF Store</title>
+  <!-- ОБЯЗАТЕЛЬНО ДЛЯ ВИБРАЦИИ И ДРУГИХ ФИШЕК ТЕЛЕГРАМ -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <header class="header">
+    <div class="header-top">
+      <div class="logo" onclick="setView('profile')" style="cursor: pointer;">
+        <img src="./images/logo.jpg" alt="PF Logo" class="header-logo-img">
+        <div class="greeting-text">
+          <span class="greeting-small">ДОБРЫЙ ДЕНЬ,</span>
+          <span id="tgUserName" class="greeting-name">ГОСТЬ!</span>
+        </div>
+      </div>
+    </div>
+    
+    <div class="search-wrapper">
+      <svg class="search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="11" cy="11" r="8"></circle>
+        <path d="m21 21-4.35-4.35"></path>
+      </svg>
+      <input type="text" class="search-input" id="searchInput" placeholder="ПОИСК">
+      <button class="search-clear" id="searchClear">✕</button>
+    </div>
+  </header>
+
+  <div id="view-home">
+    
+    <div class="slider-container">
+      <div class="slider-track" id="sliderTrack">
+        <div class="slide" onclick="openInfoModal('delivery')">
+          <div class="slide-icon">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"></rect><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon><circle cx="5.5" cy="18.5" r="2.5"></circle><circle cx="18.5" cy="18.5" r="2.5"></circle></svg>
+          </div>
+          <div class="slide-content">
+            <h3>Быстрая доставка по РФ</h3>
+            <p>Отправка в день заказа (СДЭК, Почта, Boxberry)</p>
+          </div>
+        </div>
+
+        <div class="slide" onclick="openInfoModal('promo')">
+          <div class="slide-icon">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path><line x1="4" y1="22" x2="4" y2="15"></line></svg>
+          </div>
+          <div class="slide-content">
+            <h3>Скидка 5% на первый заказ</h3>
+            <p>Промокод: START</p>
+          </div>
+        </div>
+
+        <div class="slide" onclick="openInfoModal('gifts')">
+          <div class="slide-icon">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 12 20 22 4 22 4 12"></polyline><rect x="2" y="7" width="20" height="5"></rect><line x1="12" y1="22" x2="12" y2="7"></line><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"></path><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"></path></svg>
+          </div>
+          <div class="slide-content">
+            <h3>Подарки к покупкам</h3>
+            <p>Кабель 60W в подарок к наушникам</p>
+          </div>
+        </div>
+      </div>
+      <div class="slider-dots" id="sliderDots">
+        <div class="dot active" onclick="goToSlide(0)"></div>
+        <div class="dot" onclick="goToSlide(1)"></div>
+        <div class="dot" onclick="goToSlide(2)"></div>
+      </div>
+    </div>
+
+    <div class="categories-scroll" id="categories">
+      <button class="cat-pill" data-cat="watches"><span class="cat-icon">⌚</span> ЧАСЫ</button>
+      <button class="cat-pill" data-cat="headphones"><span class="cat-icon">🎧</span> НАУШНИКИ</button>
+      <button class="cat-pill" data-cat="glasses"><span class="cat-icon">🕶</span> ОЧКИ</button>
+      <button class="cat-pill" data-cat="accessories"><span class="cat-icon">⚡</span> АКСЕССУАРЫ</button>
+    </div>
+
+    <div class="controls">
+      <button class="control-btn" id="filterBtn">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg>
+        ФИЛЬТРЫ
+      </button>
+      <div class="sort-label" onclick="resetCategory()"><span style="margin-right:6px;">🔥</span> ВСЕ ТОВАРЫ</div>
+    </div>
+
+    <div class="catalog" id="skeletonLoader">
+      <div class="skeleton-card"></div>
+      <div class="skeleton-card"></div>
+      <div class="skeleton-card"></div>
+      <div class="skeleton-card"></div>
+    </div>
+
+    <main class="catalog" id="catalog" style="display: none;"></main>
+  </div>
+
+  <div id="view-profile" style="display: none;">
+    <div class="profile-header">
+      <div class="profile-avatar">
+         <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+      </div>
+      <h2 class="profile-name" id="profileName">ПОЛЬЗОВАТЕЛЬ</h2>
+      <p class="profile-subtitle">Профиль в PF Store</p>
+    </div>
+
+    <div class="profile-section">
+      <div class="profile-item">
+        <div class="profile-item-left">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+          <div>
+            <div class="profile-item-title">Мои заказы</div>
+            <div class="profile-item-desc">История и отслеживание</div>
+          </div>
+        </div>
+        <div class="profile-item-arrow">›</div>
+      </div>
+
+      <div class="profile-item" id="myPromoBtn">
+        <div class="profile-item-left">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path><line x1="4" y1="22" x2="4" y2="15"></line></svg>
+          <div>
+            <div class="profile-item-title">Мои промокоды</div>
+            <div class="profile-item-desc" id="profilePromoCount">Нет активных</div>
+          </div>
+        </div>
+        <div class="profile-item-arrow">›</div>
+      </div>
+
+      <div class="profile-item" onclick="setView('favorites')">
+        <div class="profile-item-left">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>
+          <div>
+            <div class="profile-item-title">Избранное</div>
+            <div class="profile-item-desc" id="profileFavCount">Пока пусто</div>
+          </div>
+        </div>
+        <div class="profile-item-arrow">›</div>
+      </div>
+
+      <div class="profile-item" onclick="renderCartItems(); document.getElementById('cartModal').classList.add('active');">
+        <div class="profile-item-left">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1"></circle><circle cx="20" cy="21" r="1"></circle><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path></svg>
+          <div>
+            <div class="profile-item-title">Корзина</div>
+            <div class="profile-item-desc" id="profileCartCount">Пока пусто</div>
+          </div>
+        </div>
+        <div class="profile-item-arrow">›</div>
+      </div>
+    </div>
+
+    <div class="profile-branding">
+      <h1 class="profile-logo-text">PF STORE</h1>
+      
+      <div class="trust-card">
+        <div class="trust-card-title">Наш главный принцип: честность и открытость</div>
+        <div class="trust-card-text">
+          Мы понимаем, что покупка электроники — это в первую очередь вопрос доверия. Поэтому наш самый большой плюс в том, что вы всегда точно знаете, что покупаете. Мы не просим верить нам на слово. Вы можете лично посмотреть товар, потрогать его, послушать звук и проверить все функции на витринном образце. И только после этого вы принимаете решение — покупать или нет.
+        </div>
+        <div class="trust-card-list">
+          <div>• <strong>Никаких котов в мешке</strong></div>
+          <div>• <strong>Полная прозрачность</strong></div>
+          <div>• <strong>14 дней гарантии</strong></div>
+        </div>
+        <div class="trust-card-footer">
+          Проверяйте лично, покупайте с уверенностью.
+        </div>
+      </div>
+
+      <div class="profile-contact-title">Контакты</div>
+      
+      <a href="tel:+79612379944" class="profile-contact-item" style="text-decoration: none;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>
+        +7 (961) 237-99-44
+      </a>
+      
+      <a href="mailto:medfed2007@gmail.com" class="profile-contact-item" style="text-decoration: none;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>
+        medfed2007@gmail.com
+      </a>
+
+      <a href="https://yandex.ru/maps/?text=Барнаул,%20улица%20Сиреневая,%204" target="_blank" class="profile-contact-item" style="text-decoration: none;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+        г. Барнаул, ул. Сиреневая, 4
+      </a>
+    </div>
+  </div>
+
+  <nav class="bottom-nav">
+    <button class="nav-item active" id="navHome">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>
+      <span>ГЛАВНАЯ</span>
+    </button>
+    <button class="nav-item" id="navFavTab" style="position: relative;">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>
+      <span class="nav-badge" id="navFavCount">0</span>
+      <span>ИЗБРАННОЕ</span>
+    </button>
+    <button class="nav-item" id="navCartTab" style="position: relative;">
+      <svg id="cartIcon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1"></circle><circle cx="20" cy="21" r="1"></circle><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path></svg>
+      <span class="nav-badge" id="navCartCount">0</span>
+      <span>КОРЗИНА</span>
+    </button>
+    <button class="nav-item" id="navProfileTab">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+      <span>ПРОФИЛЬ</span>
+    </button>
+  </nav>
+
+  <div class="modal" id="productModal">
+    <div class="modal-content product-modal">
+      <button class="modal-close" id="closeProduct" style="position: absolute; top: 16px; right: 16px; z-index: 20;">✕</button>
+      <div class="gallery-container">
+        <div class="product-gallery" id="productGallery" onclick="openLightbox()"></div>
+        <button class="gallery-nav prev" id="prevImg" onclick="event.stopPropagation();">❮</button>
+        <button class="gallery-nav next" id="nextImg" onclick="event.stopPropagation();">❯</button>
+        <div class="gallery-counter" id="galleryCounter">1 / 1</div>
+      </div>
+      <div class="product-info">
+        <div class="product-badges" id="productBadges"></div>
+        <h2 class="product-title" id="productTitle"></h2>
+        <div class="product-price-block">
+          <span class="product-price" id="productPrice"></span>
+          <span class="product-old-price" id="productOldPrice"></span>
+        </div>
+        <div id="productStock" class="product-stock-status"></div>
+        <div class="product-actions" style="margin-bottom: 12px; margin-top: 16px;">
+          <button class="btn-secondary" id="addToFav">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>
+          </button>
+          <button class="btn-primary" id="addToCart">В КОРЗИНУ</button>
+        </div>
+        
+        <button class="btn-gift-info" id="giftInfoBtn" style="display: none;">
+          🎁 УЗНАТЬ ПРО ПОДАРОК
+        </button>
+
+        <button class="btn-manager" id="askManagerBtn" style="margin-bottom: 24px;">УТОЧНИТЬ У МЕНЕДЖЕРА</button>
+        <p class="product-desc" id="productDesc">Загрузка описания...</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="giftModal">
+    <div class="modal-content info-modal-content" style="height: auto; padding-bottom: 20px;">
+      <button class="modal-close" id="closeGift" style="position: absolute; top: 16px; right: 16px; z-index: 10;">✕</button>
+      <div class="gift-modal-body">
+        <div class="gift-modal-title">🎁 ВАШ ПОДАРОК</div>
+        <div class="gift-modal-img-container" id="giftModalImgContainer"></div>
+        <div class="gift-modal-desc" id="giftModalDesc">Описание подарка...</div>
+        <button class="info-btn" onclick="document.getElementById('giftModal').classList.remove('active')" style="margin-top: 20px;">МНЕ НРАВИТСЯ!</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="cartModal">
+    <div class="modal-content cart-modal">
+      <div class="modal-header"><h2>КОРЗИНА</h2><button class="modal-close" id="closeCart">✕</button></div>
+      <div class="cart-items" id="cartItems"></div>
+      <div class="cart-footer">
+        <div class="cart-summary">
+          <div class="summary-row"><span>ТОВАРЫ</span><span id="subtotal">0 ₽</span></div>
+          <div class="promo-hint" id="qtyDiscountHint" style="display: none;">🔥 Добавьте еще 1 шт., чтобы получить скидку 5%!</div>
+          <div class="promo-apply-row">
+            <input type="text" id="promoInput" placeholder="ПРОМОКОД">
+            <button id="applyPromoBtn">ОК</button>
+          </div>
+          <div class="summary-row" id="promoDiscountRow" style="display: none; color: var(--accent);"><span>ПРОМОКОД</span><span id="promoDiscountAmount">-0 ₽</span></div>
+          <div class="summary-row" id="qtyDiscountRow" style="display: none; color: var(--warning);"><span>СКИДКА ЗА КОЛИЧЕСТВО (5%)</span><span id="qtyDiscountAmount">-0 ₽</span></div>
+          <div class="summary-row"><span>ДОСТАВКА ПО ГОРОДУ</span><span id="delivery">БЕСПЛАТНО</span></div>
+          <div class="summary-row total"><span>ИТОГО</span><span id="totalPrice">0 ₽</span></div>
+        </div>
+        <button class="checkout-btn" id="checkoutBtn">ОФОРМИТЬ ЗАКАЗ</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="infoModal">
+    <div class="modal-content info-modal-content">
+      <button class="modal-close" id="closeInfo" style="position: absolute; top: 16px; right: 16px;">✕</button>
+      <div id="infoModalBody" style="padding: 30px 20px; text-align: center;"></div>
+    </div>
+  </div>
+
+  <div class="modal" id="filterModal">
+    <div class="modal-content filter-modal">
+      <div class="modal-header"><h2>ФИЛЬТРЫ</h2><button class="modal-close" id="closeFilter">✕</button></div>
+      <div class="filter-body">
+        <div class="filter-group">
+          <label>ЦЕНА, ₽</label>
+          <div class="price-range">
+            <input type="number" class="price-input" id="priceMin" placeholder="ОТ">
+            <input type="number" class="price-input" id="priceMax" placeholder="ДО">
+          </div>
+        </div>
+        <div class="filter-group">
+          <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+            <input type="checkbox" id="inStockOnly" style="width:16px; height:16px;"> ТОЛЬКО В НАЛИЧИИ
+          </label>
+        </div>
+      </div>
+      <div class="filter-footer">
+        <button class="btn-secondary" style="width:auto; flex:1; padding:16px; font-size:13px;" id="resetFilters">СБРОСИТЬ</button>
+        <button class="btn-primary" style="flex:2;" id="applyFilters">ПРИМЕНИТЬ</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="lightbox" class="lightbox" onclick="closeLightbox()">
+    <img id="lightbox-img" src="" alt="Fullscreen">
+  </div>
+
+  <div class="toast-container" id="toastContainer"></div>
+  <script src="script.js"></script>
+</body>
+</html>
