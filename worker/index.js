@@ -150,8 +150,13 @@ async function notifyManager(env, order) {
         text: lines.join('\n')
       })
     });
-    if (!response.ok) {
-      console.error('telegram_notify_failed', response.status, await response.text());
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !payload?.ok) {
+      console.error('telegram_notify_failed', response.status, payload?.description || 'unknown');
+    } else {
+      const chat = payload.result?.chat || {};
+      const from = payload.result?.from || {};
+      console.log('telegram_notify_ok', chat.id, chat.username || chat.first_name || chat.type || '', 'bot=', from.username || '');
     }
   } catch (error) {
     // уведомление не должно ломать сохранение заказа
@@ -244,9 +249,10 @@ export default {
 
     if (!manager) {
       // Покупатель может только подтвердить отправку своего заказа.
-      const nextStatus = existing ? existing.status : 'awaiting';
-      if (order.status !== nextStatus) {
-        if (!(nextStatus === 'awaiting' && order.status === 'sent')) {
+      const currentStatus = existing ? existing.status : 'awaiting';
+      if (!order.status) order.status = currentStatus;
+      if (order.status !== currentStatus) {
+        if (!(currentStatus === 'awaiting' && order.status === 'sent')) {
           return json({ error: 'status_manager_only' }, 403);
         }
       }
