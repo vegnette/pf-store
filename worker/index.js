@@ -142,7 +142,7 @@ async function notifyManager(env, order) {
   }
 
   try {
-    await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/sendMessage`, {
+    const response = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -150,8 +150,12 @@ async function notifyManager(env, order) {
         text: lines.join('\n')
       })
     });
+    if (!response.ok) {
+      console.error('telegram_notify_failed', response.status, await response.text());
+    }
   } catch (error) {
     // уведомление не должно ломать сохранение заказа
+    console.error('telegram_notify_error', error.message);
   }
 }
 

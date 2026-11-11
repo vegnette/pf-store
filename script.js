@@ -18,7 +18,7 @@ const FAVORITES_ENDPOINT = '';
 
 // URL Cloudflare Worker для синхронизации заказов между устройствами.
 // Пока пусто — история заказов хранится только на этом устройстве.
-const ORDERS_ENDPOINT = '';
+const ORDERS_ENDPOINT = 'https://pf-store-orders.vegnette.workers.dev';
 
 // Telegram-аккаунты менеджера. Username — без @.
 // ВАЖНО: это только интерфейс. Настоящая защита статусов возможна

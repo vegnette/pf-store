@@ -7,7 +7,7 @@ compatibility_date = "2025-01-01"
 # и вставьте полученный id сюда.
 [[kv_namespaces]]
 binding = "ORDERS_KV"
-id = "ВСТАВЬТЕ_ID_KV"
+id = "3ed4e74283f24d14bd41fc81fde40fba"
 
 # ID менеджеров можно задать здесь (проще для старта),
 # либо секретом: npx wrangler secret put MANAGER_IDS

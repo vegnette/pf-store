@@ -20,6 +20,18 @@
 
 Всё в бесплатном тарифе Cloudflare Workers.
 
+## Текущее состояние (уже настроено)
+
+- Worker: `pf-store-orders`
+- Адрес: <https://pf-store-orders.vegnette.workers.dev>
+- KV-хранилище `ORDERS_KV`: `3ed4e74283f24d14bd41fc81fde40fba`
+- Менеджер: Telegram ID `5352101935`, бот `@pfadmin_bot`
+- Секреты `BOT_TOKEN` и `MANAGER_CHAT_ID` заданы в Cloudflare, в репозитории их нет.
+- В `script.js` прописан `ORDERS_ENDPOINT` на этот адрес.
+
+Проверка: `curl https://pf-store-orders.vegnette.workers.dev/` должен вернуть
+`401 {"error":"invalid_init_data"}` — значит, Worker жив и требует подпись Telegram.
+
 ## Шаг 1. Бот
 
 1. Откройте [@BotFather](https://t.me/BotFather) → `/newbot`.
@@ -53,6 +65,10 @@ wrangler deploy
 ```
 https://pf-store-orders.ВАШ_АККАУНТ.workers.dev
 ```
+
+Важно: перед первым заказом менеджер должен хотя бы раз открыть бота
+и нажать `/start`. Иначе Telegram запрещает боту писать первым,
+и уведомление не дойдёт (в логах `wrangler tail` будет `telegram_notify_failed`).
 
 ## Шаг 3. Сайт
 
@@ -103,9 +119,9 @@ const TELEGRAM_BOT_USERNAME = 'имя_вашего_бота';
 
 - `manifest.webmanifest`, `sw.js` и иконки в `images/` включают установку
   сайта на главный экран и офлайн-оболочку.
-- `robots.txt` и `sitemap.xml` лежат в корне. После публикации замените
-  `USERNAME` на свой аккаунт GitHub Pages; если сайт открывается
-  из корня домена, уберите `/SHOP/` из адресов.
+- `robots.txt` и `sitemap.xml` лежат в корне. Они уже настроены на
+  `https://vegnette.github.io/pf-store/`; при смене домена обновите адреса
+  и в этих файлах, и в `canonical`/`og:url` в `index.html`.
 - Мета-теги товара и JSON-LD подставляются при открытии карточки.
   Социальные сети читают только статический HTML, поэтому для красивых
   превью каждой ссылки нужен серверный рендеринг или отдельные страницы.
