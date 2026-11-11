@@ -1,0 +1,21 @@
+name = "pf-store-orders"
+main = "index.js"
+compatibility_date = "2025-01-01"
+
+# Создайте KV-хранилище командой:
+#   npx wrangler kv namespace create ORDERS_KV
+# и вставьте полученный id сюда.
+[[kv_namespaces]]
+binding = "ORDERS_KV"
+id = "ВСТАВЬТЕ_ID_KV"
+
+# ID менеджеров можно задать здесь (проще для старта),
+# либо секретом: npx wrangler secret put MANAGER_IDS
+[vars]
+MANAGER_IDS = "5352101935"
+
+# Токен бота НЕ храните в этом файле. Добавьте секретом:
+#   npx wrangler secret put BOT_TOKEN
+#
+# Необязательно: chat_id, куда присылать уведомления о новых заказах.
+#   npx wrangler secret put MANAGER_CHAT_ID

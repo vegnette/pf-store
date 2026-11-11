@@ -1,0 +1,43 @@
+{
+  "name": "PF Store — электроника с проверкой",
+  "short_name": "PF Store",
+  "description": "Часы, наушники, очки и аксессуары. Гарантия 14 дней, проверка перед покупкой, самовывоз в Барнауле и доставка по России.",
+  "lang": "ru",
+  "dir": "ltr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "portrait",
+  "background_color": "#050505",
+  "theme_color": "#67E9D1",
+  "categories": ["shopping", "electronics"],
+  "icons": [
+    {
+      "src": "./images/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./images/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./images/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Корзина",
+      "short_name": "Корзина",
+      "url": "./?view=cart",
+      "icons": [{ "src": "./images/icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}

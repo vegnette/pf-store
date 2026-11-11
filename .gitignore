@@ -1,0 +1,15 @@
+# секреты и локальные файлы
+1.txt
+.secrets*
+.dev.vars
+.env
+
+# зависимости и кеш Cloudflare
+node_modules/
+.wrangler/
+.wrangler.toml
+*.log
+
+# системный мусор
+.DS_Store
+Thumbs.db

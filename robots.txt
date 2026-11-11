@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+Disallow: /worker/
+
+Sitemap: https://vegnette.github.io/pf-store/sitemap.xml

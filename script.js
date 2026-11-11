@@ -2,13 +2,30 @@
 
 // ⚠️ ЗАМЕНИ НА СВОЙ ЮЗЕРНЕЙМ (без @)
 const TELEGRAM_USERNAME = 'PF_Store_manager';
+// Юзернейм бота, через которого открывается мини-приложение (без @).
+// Если заполнить, гостю в профиле появится кнопка «Открыть в Telegram».
+const TELEGRAM_BOT_USERNAME = 'pfadmin_bot';
 const STORE_NAME = 'PF Store';
 const STORE_TIMEZONE = 'Asia/Barnaul';
+const STORE_UTC_OFFSET_HOURS = 7;
+const STORE_OPEN_HOUR = 10;
+const STORE_CLOSE_HOUR = 21;
 
 // Если сюда вставить URL бесплатного Cloudflare Worker,
 // избранное будет уходить менеджеру автоматически.
 // Пока пусто — работает кнопка «Отправить менеджеру».
 const FAVORITES_ENDPOINT = '';
+
+// URL Cloudflare Worker для синхронизации заказов между устройствами.
+// Пока пусто — история заказов хранится только на этом устройстве.
+const ORDERS_ENDPOINT = '';
+
+// Telegram-аккаунты менеджера. Username — без @.
+// ВАЖНО: это только интерфейс. Настоящая защита статусов возможна
+// лишь на сервере (Cloudflare Worker), который проверяет initData.
+const MANAGER_USERNAMES = ['pf_store_manager'];
+const MANAGER_IDS = [5352101935];
+const MANAGER_QUERY_PARAM = 'manager';
 
 const CATEGORY_LABELS = {
   watches: 'часы',
@@ -39,11 +56,20 @@ let confirmCallback = null;
 let confirmReturnFocus = null;
 let favoritesReportTimer = null;
 let deepLinkHandled = false;
+let recentIds = [];
+let priceDrops = {};
+let installPromptEvent = null;
+let focusReturnTarget = null;
 
 // --- ПРОМОКОДЫ ---
 let myPromoCode = localStorage.getItem('pf_promo_code');
 let promoUsed = localStorage.getItem('pf_promo_used') === 'true';
 let appliedPromoPercent = Number(localStorage.getItem('pf_promo_applied') || 0);
+
+// --- ЗАКАЗЫ ---
+let orders = [];
+let isManager = false;
+let ordersLoading = false;
 
 // --- МОДАЛЬНЫЕ ОКНА ---
 const modalStack = [];
@@ -90,6 +116,77 @@ function plural(number, one, few, many) {
   if (n1 > 1 && n1 < 5) return few;
   if (n1 === 1) return one;
   return many;
+}
+
+// Единое время магазина: Барнаул, UTC+7, без перехода на летнее время.
+function padTime(value) {
+  return String(Number(value) || 0).padStart(2, '0');
+}
+
+function getStoreDateParts(date = new Date()) {
+  try {
+    const parts = new Intl.DateTimeFormat('ru-RU', {
+      timeZone: STORE_TIMEZONE,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    }).formatToParts(date);
+
+    const read = type => {
+      const raw = parts.find(part => part.type === type)?.value;
+      return raw == null ? NaN : Number(raw);
+    };
+
+    const result = {
+      year: read('year'),
+      month: read('month'),
+      day: read('day'),
+      hours: read('hour') % 24,
+      minutes: read('minute')
+    };
+
+    if (Object.values(result).every(Number.isFinite)) return result;
+  } catch (error) {
+    // Ниже — фиксированный UTC+7, если Intl недоступен.
+  }
+
+  const shifted = new Date(date.getTime() + STORE_UTC_OFFSET_HOURS * 60 * 60 * 1000);
+  return {
+    year: shifted.getUTCFullYear(),
+    month: shifted.getUTCMonth() + 1,
+    day: shifted.getUTCDate(),
+    hours: shifted.getUTCHours(),
+    minutes: shifted.getUTCMinutes()
+  };
+}
+
+function getStoreMinutes(date = new Date()) {
+  const parts = getStoreDateParts(date);
+  return parts.hours * 60 + parts.minutes;
+}
+
+function getStoreHour(date = new Date()) {
+  return getStoreDateParts(date).hours;
+}
+
+function isStoreOpen(date = new Date()) {
+  const minutes = getStoreMinutes(date);
+  return minutes >= STORE_OPEN_HOUR * 60 && minutes < STORE_CLOSE_HOUR * 60;
+}
+
+function formatStoreDateTime(value) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return '';
+  const parts = getStoreDateParts(date);
+  return `${padTime(parts.day)}.${padTime(parts.month)}.${parts.year}, ${padTime(parts.hours)}:${padTime(parts.minutes)}`;
+}
+
+function formatStoreTime(date = new Date()) {
+  const parts = getStoreDateParts(date);
+  return `${padTime(parts.hours)}:${padTime(parts.minutes)}`;
 }
 
 function getProductImages(product) {
@@ -211,6 +308,126 @@ function animateFavoriteBadge() {
   badge.classList.add('badge-pop');
 }
 
+// ============================================================
+// СЛЕЖЕНИЕ ЗА ЦЕНОЙ ИЗБРАННОГО
+// ============================================================
+
+function safeLoadJson(key, fallback) {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(key) || 'null');
+    return parsed && typeof parsed === 'object' ? parsed : fallback;
+  } catch (error) {
+    return fallback;
+  }
+}
+
+function savePriceDrops() {
+  try {
+    localStorage.setItem('pf_price_drops', JSON.stringify(priceDrops));
+  } catch (error) {
+    // приватный режим может запрещать запись
+  }
+}
+
+function rememberFavoritePrice(id, price) {
+  try {
+    const map = safeLoadJson('pf_fav_prices', {});
+    map[Number(id)] = Number(price) || 0;
+    localStorage.setItem('pf_fav_prices', JSON.stringify(map));
+  } catch (error) {
+    // не критично
+  }
+}
+
+function forgetFavoritePrice(id) {
+  try {
+    const map = safeLoadJson('pf_fav_prices', {});
+    delete map[Number(id)];
+    localStorage.setItem('pf_fav_prices', JSON.stringify(map));
+
+    if (priceDrops[Number(id)]) {
+      delete priceDrops[Number(id)];
+      savePriceDrops();
+    }
+  } catch (error) {
+    // не критично
+  }
+}
+
+// Сравниваем цену при каждом запуске сайта. Показываем бейдж,
+// если товар из избранного подешевел с прошлого визита.
+function reconcileFavoritePrices() {
+  const stored = safeLoadJson('pf_fav_prices', {});
+  const nextStored = { ...stored };
+  const nextDrops = {};
+  let dropsFound = 0;
+
+  favorites.forEach(id => {
+    const product = products.find(item => Number(item.id) === Number(id));
+    if (!product) return;
+
+    const current = Number(product.price) || 0;
+    const previous = Number(stored[id]);
+
+    if (Number.isFinite(previous) && previous > current) {
+      nextDrops[id] = previous - current;
+      dropsFound += 1;
+    }
+
+    nextStored[id] = current;
+  });
+
+  // Убираем следы товаров, которых больше нет в избранном
+  Object.keys(nextStored).forEach(id => {
+    if (!favorites.some(favoriteId => Number(favoriteId) === Number(id))) delete nextStored[id];
+  });
+
+  priceDrops = nextDrops;
+
+  try {
+    localStorage.setItem('pf_fav_prices', JSON.stringify(nextStored));
+  } catch (error) {
+    // не критично
+  }
+  savePriceDrops();
+
+  renderPriceDropHint();
+  return dropsFound;
+}
+
+function renderPriceDropHint() {
+  const hint = document.getElementById('priceDropHint');
+  const profileHint = document.getElementById('profilePriceHint');
+  const count = Object.keys(priceDrops).length;
+  const text = count > 0
+    ? `${count === 1 ? 'Подешевел' : 'Подешевели'} ${count} ${plural(count, 'товар', 'товара', 'товаров')}`
+    : '';
+
+  if (hint) {
+    hint.hidden = count === 0;
+    if (count > 0) hint.textContent = `${text} из избранного`;
+  }
+
+  if (profileHint) {
+    profileHint.hidden = count === 0;
+    profileHint.textContent = count > 0 ? `${text} · смотрите в избранном` : '';
+  }
+}
+
+function notifyPriceDrops(count) {
+  if (!count) return;
+
+  const key = `pf_price_notice_${new Date().toISOString().slice(0, 10)}`;
+  try {
+    if (sessionStorage.getItem(key) === '1') return;
+    sessionStorage.setItem(key, '1');
+  } catch (error) {
+    // нет sessionStorage — покажем один раз за загрузку
+  }
+
+  showToast(`📉 Цена снизилась на ${count} ${plural(count, 'товар', 'товара', 'товаров')} из избранного`, 'success');
+}
+
 function toggleFavorite(id) {
   const product = products.find(item => Number(item.id) === Number(id));
   if (!product) return;
@@ -219,8 +436,10 @@ function toggleFavorite(id) {
 
   if (wasFavorite) {
     favorites = favorites.filter(favoriteId => Number(favoriteId) !== Number(id));
+    forgetFavoritePrice(id);
   } else {
     favorites.push(Number(id));
+    rememberFavoritePrice(id, product.price);
   }
 
   saveFavorites();
@@ -344,16 +563,133 @@ function renderFavorites() {
   if (!hasItems) {
     grid.innerHTML = '';
     updateFavoriteBadge();
+    renderPriceDropHint();
     return;
   }
 
-  grid.innerHTML = favoriteProducts.map(product => buildProductCard(product)).join('');
+  grid.innerHTML = favoriteProducts.map(product => buildProductCard(product, {
+    priceDrop: priceDrops[product.id] || 0
+  })).join('');
   updateFavoriteBadge();
+  renderPriceDropHint();
 }
 
 function openFavorites() {
   [...modalStack].forEach(modal => closeModal(modal));
   setView('favorites');
+}
+
+// ============================================================
+// НЕДАВНО ПРОСМОТРЕННЫЕ И ПОХОЖИЕ ТОВАРЫ
+// ============================================================
+
+function safeLoadRecent() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem('pf_recent') || '[]');
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map(Number)
+      .filter((id, index, list) => Number.isFinite(id) && list.indexOf(id) === index)
+      .slice(0, 8);
+  } catch (error) {
+    return [];
+  }
+}
+
+function saveRecent() {
+  try {
+    localStorage.setItem('pf_recent', JSON.stringify(recentIds));
+  } catch (error) {
+    // не критично
+  }
+}
+
+function addRecentProduct(id) {
+  const numericId = Number(id);
+  if (!Number.isFinite(numericId)) return;
+
+  recentIds = [numericId, ...recentIds.filter(item => Number(item) !== numericId)].slice(0, 8);
+  saveRecent();
+  renderRecent();
+}
+
+function getRecentProducts() {
+  return recentIds
+    .map(id => products.find(product => Number(product.id) === Number(id)))
+    .filter(Boolean)
+    .slice(0, 8);
+}
+
+function renderRecent() {
+  const section = document.getElementById('recentSection');
+  const list = document.getElementById('recentList');
+  if (!section || !list) return;
+
+  const items = productsLoaded ? getRecentProducts() : [];
+  const visible = currentView === 'home' && items.length > 0;
+
+  section.hidden = !visible;
+  if (!visible) {
+    list.innerHTML = '';
+    return;
+  }
+
+  list.innerHTML = items.map(product => {
+    const image = getProductImages(product)[0];
+    return `
+      <button type="button" class="recent-card" data-recent="${product.id}"
+              aria-label="Открыть товар: ${escapeHtml(product.title)}">
+        <img src="${image}" alt="${escapeHtml(product.title)}" loading="lazy" decoding="async"
+             onerror="this.onerror=null;this.src='${NO_PHOTO}'">
+        <span class="recent-card-title">${escapeHtml(product.title)}</span>
+        <span class="recent-price">${formatPrice(product.price)}</span>
+      </button>`;
+  }).join('');
+}
+
+function clearRecent() {
+  recentIds = [];
+  saveRecent();
+  renderRecent();
+  showToast('История просмотров очищена');
+}
+
+function renderSimilar(product) {
+  const block = document.getElementById('similarBlock');
+  const list = document.getElementById('similarList');
+  if (!block || !list || !product) return;
+
+  const sameCategory = products.filter(item =>
+    Number(item.id) !== Number(product.id) && item.category === product.category
+  );
+
+  const rest = products.filter(item =>
+    Number(item.id) !== Number(product.id) && item.category !== product.category
+  );
+
+  const rank = item => (Number(item.stock) > 0 ? 0 : 1);
+  const sorted = [
+    ...sameCategory.sort((a, b) => rank(a) - rank(b) || Number(b.stock) - Number(a.stock)),
+    ...rest.sort((a, b) => rank(a) - rank(b) || Number(b.stock) - Number(a.stock))
+  ].slice(0, 6);
+
+  block.hidden = sorted.length === 0;
+  if (!sorted.length) {
+    list.innerHTML = '';
+    return;
+  }
+
+  list.innerHTML = sorted.map(item => {
+    const image = getProductImages(item)[0];
+    return `
+      <button type="button" class="similar-card" data-similar="${item.id}"
+              aria-label="Открыть похожий товар: ${escapeHtml(item.title)}">
+        <img src="${image}" alt="${escapeHtml(item.title)}" loading="lazy" decoding="async"
+             onerror="this.onerror=null;this.src='${NO_PHOTO}'">
+        <span class="similar-card-title">${escapeHtml(item.title)}</span>
+        <span class="similar-price">${formatPrice(item.price)}</span>
+      </button>`;
+  }).join('');
 }
 
 function clearFavorites() {
@@ -405,9 +741,27 @@ function openManagerChat(product) {
   triggerHaptic('selection');
 }
 
+function openStockNotify(product) {
+  if (!product) return;
+
+  const url = `${location.origin}${location.pathname}?product=${product.id}`;
+  const text = `Здравствуйте! Сообщите, пожалуйста, когда появится в наличии: ${product.title} — ${formatPrice(product.price)}. Ссылка: ${url}`;
+
+  openTelegramLink(`https://t.me/${TELEGRAM_USERNAME}?text=${encodeURIComponent(text)}`);
+  playSound('tap');
+  triggerHaptic('selection');
+  showToast('Запрос открыт в Telegram', 'success');
+}
+
 function copyText(text) {
   if (navigator.clipboard?.writeText) {
-    return navigator.clipboard.writeText(text);
+    return navigator.clipboard.writeText(text).catch(() => new Promise((resolve, reject) => {
+      try {
+        fallbackCopy(text, resolve);
+      } catch (error) {
+        reject(error);
+      }
+    }));
   }
 
   return new Promise((resolve, reject) => {
@@ -627,7 +981,7 @@ function showNotification({ title, text = '', image = '', type = 'success', icon
 // ============================================================
 
 function getGreetingPhrase() {
-  const hour = new Date().getHours();
+  const hour = getStoreHour();
   if (hour >= 5 && hour < 12) return 'Доброе утро';
   if (hour >= 12 && hour < 18) return 'Добрый день';
   if (hour >= 18 && hour < 23) return 'Добрый вечер';
@@ -773,21 +1127,47 @@ function showToast(message, type = '') {
 // МОДАЛЬНЫЕ ОКНА
 // ============================================================
 
+const modalFocusReturn = new WeakMap();
+
+function getFocusable(container) {
+  if (!container) return [];
+  return Array.from(container.querySelectorAll(
+    'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+  )).filter(el => el.offsetParent !== null || el === document.activeElement);
+}
+
 function openModal(target) {
   const el = typeof target === 'string' ? document.getElementById(target) : target;
   if (!el) return;
 
+  if (!el.classList.contains('active')) {
+    modalFocusReturn.set(el, document.activeElement);
+  }
+
   el.classList.add('active');
+  el.removeAttribute('aria-hidden');
   if (!modalStack.includes(el)) modalStack.push(el);
   document.body.classList.add('modal-open');
   updateBackButton();
+
+  if (!el.id.startsWith('confirm')) {
+    requestAnimationFrame(() => {
+      if (!modalStack.length || modalStack[modalStack.length - 1] !== el) return;
+      if (el.contains(document.activeElement) && document.activeElement !== document.body) return;
+      const focusable = getFocusable(el);
+      (focusable[0] || el).focus({ preventScroll: true });
+    });
+  }
 }
 
 function closeModal(target) {
   const el = typeof target === 'string' ? document.getElementById(target) : target;
   if (!el) return;
 
+  const wasActive = el.classList.contains('active');
+
   el.classList.remove('active');
+  el.setAttribute('aria-hidden', 'true');
   const index = modalStack.indexOf(el);
   if (index !== -1) modalStack.splice(index, 1);
 
@@ -802,13 +1182,63 @@ function closeModal(target) {
     if (returnFocus && typeof returnFocus.focus === 'function' && document.contains(returnFocus)) {
       setTimeout(() => returnFocus.focus({ preventScroll: true }), 50);
     }
+  } else if (wasActive) {
+    const returnFocus = modalFocusReturn.get(el);
+    if (returnFocus && typeof returnFocus.focus === 'function' && document.contains(returnFocus)) {
+      setTimeout(() => returnFocus.focus({ preventScroll: true }), 50);
+    }
+  }
+
+  if (el.id === 'productModal') {
+    resetProductSeo();
+    renderRecent();
   }
 
   updateBackButton();
 }
 
+function trapModalFocus(event) {
+  if (event.key !== 'Tab' || !modalStack.length) return;
+
+  const top = modalStack[modalStack.length - 1];
+  const focusable = getFocusable(top);
+
+  if (!focusable.length) {
+    event.preventDefault();
+    top.focus({ preventScroll: true });
+    return;
+  }
+
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+
+  if (event.shiftKey) {
+    if (document.activeElement === first || !top.contains(document.activeElement)) {
+      event.preventDefault();
+      last.focus({ preventScroll: true });
+    }
+  } else if (document.activeElement === last || !top.contains(document.activeElement)) {
+    event.preventDefault();
+    first.focus({ preventScroll: true });
+  }
+}
+
+function handleGlobalKeydown(event) {
+  if (event.key === 'Escape' && modalStack.length) {
+    event.preventDefault();
+    closeTopModal();
+    return;
+  }
+  trapModalFocus(event);
+}
+
+const CONFIRM_ICONS = {
+  trash: '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>',
+  send: '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>'
+};
+
 // Брендированное подтверждение действий
-function openConfirm({ title, text, confirmText = 'ПОДТВЕРДИТЬ', onConfirm = null }) {
+function openConfirm({ title, text, confirmText = 'ПОДТВЕРДИТЬ', onConfirm = null, icon = 'trash' }) {
   const modal = document.getElementById('confirmModal');
   if (!modal) {
     if (onConfirm && window.confirm(title || 'Подтвердить действие?')) onConfirm();
@@ -821,10 +1251,15 @@ function openConfirm({ title, text, confirmText = 'ПОДТВЕРДИТЬ', onCo
   const titleEl = document.getElementById('confirmTitle');
   const textEl = document.getElementById('confirmText');
   const okBtn = document.getElementById('confirmOk');
+  const iconEl = modal.querySelector('.confirm-icon');
 
   if (titleEl) titleEl.textContent = title || 'Подтвердить действие?';
   if (textEl) textEl.textContent = text || 'Это действие нельзя отменить.';
   if (okBtn) okBtn.textContent = confirmText;
+  if (iconEl) {
+    iconEl.innerHTML = CONFIRM_ICONS[icon] || CONFIRM_ICONS.trash;
+    iconEl.classList.toggle('send', icon === 'send');
+  }
 
   openModal(modal);
   requestAnimationFrame(() => {
@@ -877,29 +1312,696 @@ function openCart() {
 // TELEGRAM
 // ============================================================
 
-function initTelegram() {
-  if (!tg) return;
+function ensureTelegramApp() {
+  if (!tg && window.Telegram?.WebApp) tg = window.Telegram.WebApp;
+  return tg;
+}
+
+function parseInitDataUser(initData) {
+  if (!initData || typeof initData !== 'string') return null;
+  try {
+    const raw = new URLSearchParams(initData).get('user');
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+function readTelegramUser() {
+  const app = ensureTelegramApp();
+  if (!app) return null;
+
+  const direct = app.initDataUnsafe?.user;
+  if (direct && (direct.id || direct.first_name)) return direct;
+
+  const parsed = parseInitDataUser(app.initData);
+  if (parsed && (parsed.id || parsed.first_name)) return parsed;
+
+  return null;
+}
+
+function isTelegramEnvironment() {
+  const app = ensureTelegramApp();
+  if (!app) return false;
+  if (app.initData) return true;
+  const platform = String(app.platform || '').toLowerCase();
+  return Boolean(platform) && platform !== 'unknown';
+}
+
+function detectManager(user) {
+  if (!user) {
+    try {
+      const params = new URLSearchParams(location.search);
+      return params.get(MANAGER_QUERY_PARAM) === '1';
+    } catch (error) {
+      return false;
+    }
+  }
+
+  const username = String(user.username || '').toLowerCase();
+  if (username && MANAGER_USERNAMES.includes(username)) return true;
+  if (MANAGER_IDS.some(id => String(id) === String(user.id))) return true;
+
+  const startParam = ensureTelegramApp()?.initDataUnsafe?.start_param;
+  if (String(startParam || '').toLowerCase() === 'manager') return true;
 
   try {
-    tg.ready();
-    tg.expand();
+    return new URLSearchParams(location.search).get(MANAGER_QUERY_PARAM) === '1';
+  } catch (error) {
+    return false;
+  }
+}
+
+function setTelegramStatus(state) {
+  const el = document.getElementById('profileTelegramLine');
+  if (!el) return;
+
+  el.classList.remove('connected', 'error');
+
+  if (state === 'connected') {
+    el.classList.add('connected');
+    el.textContent = isManager ? 'Telegram · менеджер' : 'Telegram подключён';
+    el.title = currentUser?.username ? `@${currentUser.username}` : 'Профиль Telegram активен';
+  } else if (state === 'error') {
+    el.classList.add('error');
+    el.textContent = 'Telegram не ответил';
+    el.title = 'Данные профиля не пришли. Перезапустите мини-приложение.';
+  } else {
+    el.textContent = TELEGRAM_BOT_USERNAME ? 'Открыть в Telegram' : 'Откройте через Telegram';
+    el.title = 'Имя и аватар подтягиваются только в мини-приложении Telegram';
+  }
+}
+
+function applyManagerUI() {
+  const roleEl = document.getElementById('profileRole');
+  const subtitleEl = document.getElementById('profileSubtitle');
+  if (roleEl) roleEl.hidden = !isManager;
+  if (subtitleEl) subtitleEl.textContent = isManager ? 'Менеджер PF Store' : 'Покупатель PF Store';
+}
+
+function applyTelegramUser(user) {
+  if (!user || !(user.id || user.first_name)) return false;
+
+  currentUser = user;
+  isManager = detectManager(user);
+
+  renderUserProfile(user);
+  applyManagerUI();
+  setTelegramStatus('connected');
+  updateOrderBadge();
+  return true;
+}
+
+function initTelegram() {
+  const app = ensureTelegramApp();
+
+  if (!app) {
+    isManager = detectManager(null);
+    applyManagerUI();
+    setTelegramStatus('guest');
+    return;
+  }
+
+  try {
+    app.ready();
+    app.expand();
   } catch (error) {
     // ignore
   }
 
   try {
-    tg.setHeaderColor?.('#67E9D1');
-    tg.setBackgroundColor?.('#050505');
+    app.setHeaderColor?.('#67E9D1');
+    app.setBackgroundColor?.('#050505');
   } catch (error) {
     // старые версии Telegram
   }
 
-  const user = tg.initDataUnsafe?.user;
-  if (user?.first_name) {
-    renderUserProfile(user);
+  const tryResolve = () => {
+    const user = readTelegramUser();
+    return user ? applyTelegramUser(user) : false;
+  };
+
+  if (!tryResolve()) {
+    // initData может появиться с задержкой — пробуем несколько раз
+    [120, 350, 800, 1600, 2600].forEach(delay => {
+      setTimeout(() => {
+        if (!currentUser) tryResolve();
+      }, delay);
+    });
+
+    setTimeout(() => {
+      if (!currentUser) {
+        setTelegramStatus(isTelegramEnvironment() ? 'error' : 'guest');
+        isManager = detectManager(null);
+        applyManagerUI();
+      }
+    }, 3200);
   }
 
   initBackButton();
+}
+
+// ============================================================
+// ЗАКАЗЫ
+// ============================================================
+
+const ORDER_STATUS_LABELS = {
+  awaiting: 'НЕ ОТПРАВЛЕН',
+  sent: 'ОТПРАВЛЕН',
+  delivered: 'ДОСТАВЛЕН',
+  canceled: 'ОТМЕНЁН'
+};
+
+function safeLoadOrders() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem('pf_orders') || '[]');
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter(order => order && order.id && Array.isArray(order.items))
+      .map(order => ({
+        ...order,
+        status: ORDER_STATUS_LABELS[order.status] ? order.status : 'awaiting'
+      }));
+  } catch (error) {
+    return [];
+  }
+}
+
+function saveOrders() {
+  try {
+    localStorage.setItem('pf_orders', JSON.stringify(orders));
+  } catch (error) {
+    // история не критична для покупки
+  }
+}
+
+function formatOrderDate(value) {
+  return formatStoreDateTime(value);
+}
+
+function createOrderRecord(totals, items, customer = null) {
+  const now = new Date();
+  return {
+    id: `PF-${now.getTime().toString(36).toUpperCase().slice(-5)}`,
+    createdAt: now.toISOString(),
+    updatedAt: now.toISOString(),
+    status: 'awaiting',
+    items: items.map(item => ({
+      id: Number(item.id),
+      title: String(item.title || ''),
+      price: Number(item.price) || 0,
+      qty: Number(item.qty) || 1,
+      stock: Number(item.stock) || 0,
+      gift: item.gift_desc ? String(item.gift_desc) : ''
+    })),
+    subtotal: totals.subtotal,
+    qtyDiscount: totals.qtyDiscountAmount || 0,
+    promoCode: appliedPromoPercent > 0 ? myPromoCode : '',
+    promoPercent: appliedPromoPercent,
+    promoDiscount: totals.promoDiscountAmount || 0,
+    total: totals.total,
+    customer: customer ? {
+      name: String(customer.name || '').trim(),
+      phone: String(customer.phone || '').trim()
+    } : null,
+    delivery: customer ? {
+      method: ['pickup', 'city', 'russia'].includes(customer.delivery) ? customer.delivery : 'pickup',
+      address: String(customer.address || '').trim(),
+      comment: String(customer.comment || '').trim()
+    } : null,
+    user: currentUser ? {
+      id: currentUser.id ?? null,
+      username: currentUser.username || '',
+      first_name: currentUser.first_name || ''
+    } : null
+  };
+}
+
+function buildOrderMessage(order) {
+  const lines = [`Здравствуйте! Хочу оформить заказ ${order.id} в ${STORE_NAME}.`];
+
+  if (order.user?.first_name || order.user?.username) {
+    const who = [
+      order.user.first_name,
+      order.user.username ? `@${order.user.username}` : ''
+    ].filter(Boolean).join(' · ');
+    lines.push(`Покупатель: ${who}`);
+  }
+
+  if (order.customer?.name || order.customer?.phone) {
+    const contact = [order.customer.name, order.customer.phone].filter(Boolean).join(', ');
+    lines.push(`Контакт: ${contact}`);
+  }
+
+  lines.push('');
+
+  order.items.forEach(item => {
+    lines.push(`• ${item.title}${Number(item.stock) <= 0 ? ' (под заказ)' : ''}`);
+    lines.push(`  ${item.qty} шт. × ${formatPrice(item.price)} = ${formatPrice(item.price * item.qty)}`);
+    if (item.gift) {
+      lines.push(`  🎁 Подарок: ${String(item.gift).replace('🎁', '').trim()}`);
+    }
+  });
+
+  lines.push('');
+
+  if (order.qtyDiscount > 0) {
+    lines.push(`Скидка за количество (5%): -${formatPrice(order.qtyDiscount)}`);
+  }
+  if (order.promoPercent > 0) {
+    lines.push(`Промокод ${order.promoCode} (-${order.promoPercent}%): -${formatPrice(order.promoDiscount)}`);
+  }
+
+  lines.push(`Итого: ${formatPrice(order.total)}`);
+
+  const deliveryMethod = order.delivery?.method;
+  if (deliveryMethod === 'city') {
+    lines.push('Получение: доставка по Барнаулу — бесплатно');
+    lines.push(order.delivery.address ? `Адрес: ${order.delivery.address}` : 'Адрес уточню в чате');
+  } else if (deliveryMethod === 'russia') {
+    lines.push('Получение: отправка по России');
+    lines.push(order.delivery.address ? `Город и адрес: ${order.delivery.address}` : 'Город и адрес уточню в чате');
+    lines.push('Стоимость доставки подтвердите, пожалуйста, в чате.');
+  } else if (deliveryMethod === 'pickup') {
+    lines.push(`Получение: самовывоз — Барнаул, Павловский тракт, 307к3 (${STORE_OPEN_HOUR}:00–${STORE_CLOSE_HOUR}:00)`);
+  } else {
+    lines.push(`Самовывоз: Барнаул, Павловский тракт, 307к3 (${STORE_OPEN_HOUR}:00–${STORE_CLOSE_HOUR}:00)`);
+  }
+
+  if (order.delivery?.comment) {
+    lines.push(`Комментарий: ${order.delivery.comment}`);
+  }
+
+  lines.push('Подтвердите, пожалуйста, наличие и удобное время выдачи.');
+
+  return lines.join('\n');
+}
+
+function orderTelegramUrl(order) {
+  const text = order.message || buildOrderMessage(order);
+  return `https://t.me/${TELEGRAM_USERNAME}?text=${encodeURIComponent(text)}`;
+}
+
+function syncOrder(order) {
+  if (!ORDERS_ENDPOINT || !order) return;
+
+  fetch(ORDERS_ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ type: 'order', order, initData: ensureTelegramApp()?.initData || '' }),
+    keepalive: true
+  }).catch(() => {
+    // синхронизация не должна мешать оформлению
+  });
+}
+
+function syncOrderStatus(order) {
+  if (!ORDERS_ENDPOINT || !order) return;
+
+  fetch(ORDERS_ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      type: 'status',
+      id: order.id,
+      status: order.status,
+      initData: ensureTelegramApp()?.initData || ''
+    }),
+    keepalive: true
+  }).catch(() => {
+    // статус останется локальным до следующей синхронизации
+  });
+}
+
+async function loadOrdersFromServer() {
+  if (!ORDERS_ENDPOINT || ordersLoading) return;
+  ordersLoading = true;
+
+  try {
+    const initData = ensureTelegramApp()?.initData || '';
+    const url = new URL(ORDERS_ENDPOINT, location.href);
+    if (initData) url.searchParams.set('initData', initData);
+
+    const response = await fetch(url.toString(), {
+      method: 'GET',
+      headers: { Accept: 'application/json' }
+    });
+    if (!response.ok) return;
+
+    const data = await response.json();
+    const remote = Array.isArray(data?.orders) ? data.orders : [];
+    if (!remote.length) return;
+
+    const byId = new Map(orders.map(order => [order.id, order]));
+    remote.forEach(order => {
+      if (!order?.id || !Array.isArray(order.items)) return;
+      const local = byId.get(order.id);
+      const remoteTime = new Date(order.updatedAt || order.createdAt || 0).getTime();
+      const localTime = new Date(local?.updatedAt || local?.createdAt || 0).getTime();
+      if (!local || remoteTime >= localTime) byId.set(order.id, order);
+    });
+
+    orders = [...byId.values()];
+    saveOrders();
+    updateOrderBadge();
+    if (document.getElementById('ordersModal')?.classList.contains('active')) renderOrders();
+  } catch (error) {
+    // офлайн — остаётся локальная история
+  } finally {
+    ordersLoading = false;
+  }
+}
+
+function updateOrderBadge() {
+  const el = document.getElementById('profileOrdersCount');
+  if (!el) return;
+
+  if (!orders.length) {
+    el.textContent = 'Пока нет заказов';
+    el.classList.remove('warn');
+    return;
+  }
+
+  const awaiting = orders.filter(order => order.status === 'awaiting').length;
+  const total = orders.length;
+  el.textContent = awaiting > 0
+    ? `${total} ${plural(total, 'заказ', 'заказа', 'заказов')} · ${awaiting} ждёт подтверждения`
+    : `${total} ${plural(total, 'заказ', 'заказа', 'заказов')}`;
+  el.classList.toggle('warn', awaiting > 0);
+}
+
+function openOrders() {
+  renderOrders();
+  openModal('ordersModal');
+  playSound('tap');
+  triggerHaptic('selection');
+  if (ORDERS_ENDPOINT) loadOrdersFromServer();
+}
+
+function renderOrderActions(order) {
+  const id = escapeHtml(order.id);
+  const actions = [];
+  const btn = (action, label, primary = false) => `
+    <button type="button" class="order-action-btn${primary ? ' primary' : ''}"
+      data-order-action="${action}" data-order-id="${id}">${label}</button>`;
+
+  if (order.status === 'awaiting') {
+    actions.push(btn('sent', 'Я отправил', true));
+    actions.push(btn('resend', 'Открыть Telegram'));
+  } else if (order.status === 'sent') {
+    actions.push(btn('reorder', 'Повторить заказ'));
+    if (isManager) {
+      actions.push(btn('delivered', 'Доставлен', true));
+      actions.push(btn('awaiting', 'Не отправлен'));
+    } else {
+      actions.push(btn('resend', 'Написать менеджеру'));
+    }
+  } else if (order.status === 'delivered') {
+    actions.push(btn('reorder', 'Повторить заказ'));
+    actions.push(btn('resend', 'Написать менеджеру'));
+  } else if (order.status === 'canceled') {
+    actions.push(btn('reorder', 'Повторить заказ'));
+  }
+
+  if (isManager && order.status !== 'canceled') {
+    actions.push(btn('canceled', 'Отменить'));
+  }
+
+  return actions.length ? `<div class="order-actions">${actions.join('')}</div>` : '';
+}
+
+function renderOrderTimeline(order) {
+  const status = ORDER_STATUS_LABELS[order.status] ? order.status : 'awaiting';
+  if (status === 'canceled') return '';
+
+  const sentDone = status === 'sent' || status === 'delivered';
+  const deliveredDone = status === 'delivered';
+  const steps = [
+    { label: 'Создан', state: 'done' },
+    { label: 'У менеджера', state: sentDone ? 'done' : 'current' },
+    {
+      label: deliveredDone ? 'Доставлен' : 'Доставка',
+      state: deliveredDone ? 'done' : (sentDone ? 'current' : '')
+    }
+  ];
+
+  return `<div class="order-timeline ${status}" aria-label="Этапы заказа: ${steps.map(step => step.label).join(', ')}">
+    ${steps.map(step => `
+      <div class="order-step ${step.state}">
+        <span class="order-step-dot" aria-hidden="true"></span>
+        <span class="order-step-label">${step.label}</span>
+      </div>`).join('')}
+  </div>`;
+}
+
+function renderOrderDelivery(order) {
+  const method = order.delivery?.method;
+  if (!method) return '';
+
+  const labels = {
+    pickup: 'Самовывоз · Барнаул, Павловский тракт, 307к3',
+    city: 'Доставка по Барнаулу · бесплатно',
+    russia: 'Отправка по России · стоимость подтвердит менеджер'
+  };
+
+  const parts = [labels[method] || labels.pickup];
+  if (order.delivery.address) parts.push(order.delivery.address);
+  if (order.delivery.comment) parts.push(`Комментарий: ${order.delivery.comment}`);
+
+  return `<div class="order-delivery">${escapeHtml(parts.join(' · '))}</div>`;
+}
+
+function renderOrders() {
+  const body = document.getElementById('ordersBody');
+  if (!body) return;
+
+  const subtitle = document.getElementById('ordersSubtitle');
+  if (subtitle) subtitle.textContent = isManager ? 'Панель менеджера' : 'История заказов';
+
+  const list = [...orders].sort((a, b) => {
+    const aTime = new Date(a.createdAt || 0).getTime();
+    const bTime = new Date(b.createdAt || 0).getTime();
+    return bTime - aTime;
+  });
+
+  const toolbar = `
+    <div class="orders-toolbar${isManager ? ' manager' : ''}">
+      <span>${isManager
+        ? (ORDERS_ENDPOINT
+          ? 'Все заказы магазина · отмечайте отправленные'
+          : 'Заказы на этом устройстве · отмечайте отправленные')
+        : (ORDERS_ENDPOINT
+          ? 'Статусы синхронизируются с менеджером'
+          : 'Статус заказа подтверждается вручную')}</span>
+      <span class="orders-toolbar-badge">${isManager ? 'МЕНЕДЖЕР' : (ORDERS_ENDPOINT ? 'ОНЛАЙН' : 'ЛОКАЛЬНО')}</span>
+    </div>`;
+
+  if (!list.length) {
+    body.innerHTML = `${toolbar}
+      <div class="orders-empty">
+        <div class="orders-empty-icon" aria-hidden="true">📦</div>
+        <div class="orders-empty-title">Заказов пока нет</div>
+        <p class="orders-empty-text">Оформите заказ — он появится здесь, и вы сможете проверить, отправлен ли он менеджеру.</p>
+        <button type="button" class="empty-reset" data-order-action="shop">ПЕРЕЙТИ К ПОКУПКАМ</button>
+      </div>`;
+    return;
+  }
+
+  body.innerHTML = toolbar + list.map(order => {
+    const status = ORDER_STATUS_LABELS[order.status] ? order.status : 'awaiting';
+    const discountLines = [];
+
+    if (order.qtyDiscount > 0) {
+      discountLines.push(`<div class="order-discount-line"><span>Скидка за количество</span><span>-${formatPrice(order.qtyDiscount)}</span></div>`);
+    }
+    if (order.promoPercent > 0) {
+      discountLines.push(`<div class="order-discount-line"><span>Промокод ${escapeHtml(order.promoCode || '')}</span><span>-${formatPrice(order.promoDiscount)}</span></div>`);
+    }
+
+    const buyer = isManager && order.user
+      ? [order.user.first_name, order.user.username ? `@${order.user.username}` : ''].filter(Boolean).join(' · ')
+      : '';
+
+    return `
+      <article class="order-card">
+        <div class="order-card-head">
+          <div class="order-id-block">
+            <div class="order-id-row">
+              <span class="order-id">${escapeHtml(order.id)}</span>
+              <button type="button" class="order-copy-btn" data-order-action="copy" data-order-id="${escapeHtml(order.id)}"
+                      aria-label="Скопировать номер заказа ${escapeHtml(order.id)}" title="Скопировать номер">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+              </button>
+            </div>
+            <div class="order-date">${formatOrderDate(order.createdAt)}${order.cancelNote ? ` · ${escapeHtml(order.cancelNote)}` : ''}</div>
+          </div>
+          <span class="order-status ${status}">${ORDER_STATUS_LABELS[status]}</span>
+        </div>
+        ${renderOrderTimeline(order)}
+        <div class="order-items">
+          ${order.items.map(item => `
+            <div class="order-item-line">
+              <span>${escapeHtml(item.title)} × ${item.qty}</span>
+              <span>${formatPrice(Number(item.price) * Number(item.qty))}</span>
+            </div>`).join('')}
+        </div>
+        ${discountLines.length ? `<div class="order-discounts">${discountLines.join('')}</div>` : ''}
+        <div class="order-total-row"><span>Итого</span><strong>${formatPrice(order.total)}</strong></div>
+        ${renderOrderDelivery(order)}
+        ${buyer ? `<div class="order-buyer">Покупатель: ${escapeHtml(buyer)}</div>` : ''}
+        ${renderOrderActions(order)}
+      </article>`;
+  }).join('') + `
+    <div class="orders-local-note">${isManager
+      ? (ORDERS_ENDPOINT
+        ? 'Заказы синхронизируются с Cloudflare Worker. Статусы видны на всех устройствах.'
+        : 'Панель работает на этом устройстве. Для синхронизации между устройствами подключите ORDERS_ENDPOINT — инструкция в папке worker.')
+      : (ORDERS_ENDPOINT
+        ? 'История синхронизируется с сервером. Статус «Отправлен» ставит менеджер или вы сами после отправки сообщения.'
+        : 'История хранится на этом устройстве. Статус «Отправлен» появляется только после вашего подтверждения или отметки менеджера.')}</div>`;
+}
+
+function askOrderConfirmation(orderId) {
+  const order = orders.find(item => item.id === orderId);
+  if (!order || order.status !== 'awaiting') return;
+  if (document.getElementById('confirmModal')?.classList.contains('active')) return;
+
+  openConfirm({
+    title: 'Сообщение отправлено?',
+    text: `Заказ ${order.id} пока сохранён как «не отправлен». Нажмите «Я ОТПРАВИЛ» только если сообщение действительно ушло менеджеру. Если нет — заказ останется в профиле, и его можно отправить позже.`,
+    confirmText: 'Я ОТПРАВИЛ',
+    icon: 'send',
+    onConfirm: () => markOrderSent(order.id)
+  });
+}
+
+function markOrderSent(orderId) {
+  const order = orders.find(item => item.id === orderId);
+  if (!order) return;
+  if (order.status === 'sent') {
+    showToast('Заказ уже отмечен как отправленный');
+    return;
+  }
+
+  const now = new Date().toISOString();
+  order.status = 'sent';
+  order.confirmedAt = now;
+  order.updatedAt = now;
+  order.confirmedBy = 'user';
+  saveOrders();
+  syncOrder(order);
+
+  // Промокод считается использованным только после подтверждения отправки
+  if (order.promoPercent > 0) {
+    promoUsed = true;
+    localStorage.setItem('pf_promo_used', 'true');
+  }
+  appliedPromoPercent = 0;
+  localStorage.setItem('pf_promo_applied', '0');
+
+  // Убираем из корзины только позиции этого заказа
+  order.items.forEach(line => {
+    const cartItem = cart.find(item => Number(item.id) === Number(line.id));
+    if (!cartItem) return;
+    cartItem.qty -= Number(line.qty) || 0;
+    if (cartItem.qty <= 0) cart = cart.filter(item => item !== cartItem);
+  });
+
+  if (!cart.length) hasShownQtyDiscountToast = false;
+  saveCart();
+  updateUI();
+  renderOrders();
+  updateOrderBadge();
+
+  showToast('Заказ отмечен как отправленный', 'success');
+  playSound('success');
+  triggerHaptic('success');
+  showNotification({
+    title: 'Отправлено менеджеру',
+    text: `${order.id} · ${formatPrice(order.total)}`,
+    type: 'order',
+    duration: 3200
+  });
+}
+
+function setOrderStatus(orderId, status) {
+  if (!isManager) {
+    showToast('Доступно только менеджеру', 'error');
+    return;
+  }
+  if (!ORDER_STATUS_LABELS[status]) return;
+
+  const order = orders.find(item => item.id === orderId);
+  if (!order || order.status === status) return;
+
+  const now = new Date().toISOString();
+  order.status = status;
+  order.updatedAt = now;
+  order.updatedBy = currentUser?.username || currentUser?.first_name || 'manager';
+  if (status === 'sent' && !order.confirmedAt) order.confirmedAt = now;
+  if (status === 'delivered') {
+    if (!order.confirmedAt) order.confirmedAt = now;
+    if (!order.deliveredAt) order.deliveredAt = now;
+  }
+
+  saveOrders();
+  syncOrderStatus(order);
+  renderOrders();
+  updateOrderBadge();
+  renderCartItems();
+  showToast(`Статус: ${ORDER_STATUS_LABELS[status].toLowerCase()}`, 'success');
+  playSound('success');
+  triggerHaptic('success');
+}
+
+function resendOrder(orderId) {
+  const order = orders.find(item => item.id === orderId);
+  if (!order) return;
+
+  openTelegramLink(orderTelegramUrl(order));
+  playSound('tap');
+  triggerHaptic('selection');
+  showToast('Сообщение открыто в Telegram', 'success');
+
+  if (order.status === 'awaiting') {
+    setTimeout(() => askOrderConfirmation(order.id), 600);
+  }
+}
+
+function reorder(orderId) {
+  const order = orders.find(item => item.id === orderId);
+  if (!order) return;
+
+  let added = 0;
+
+  order.items.forEach(line => {
+    const product = products.find(item => Number(item.id) === Number(line.id));
+    if (!product) return;
+
+    const stock = Number(product.stock) || 0;
+    const maxQty = stock > 0 ? stock : 99;
+    const existing = cart.find(item => Number(item.id) === Number(product.id));
+
+    if (existing) {
+      existing.qty = Math.min(existing.qty + Number(line.qty), maxQty);
+    } else {
+      cart.push({ ...product, qty: Math.min(Number(line.qty) || 1, maxQty) });
+    }
+    added += 1;
+  });
+
+  if (!added) {
+    showToast('Товары из заказа больше недоступны', 'error');
+    return;
+  }
+
+  saveCart();
+  updateUI();
+  closeModal('ordersModal');
+  openCart();
+  showToast('Товары добавлены в корзину', 'success');
 }
 
 // ============================================================
@@ -1031,15 +2133,22 @@ async function loadProducts() {
       reconcileFavorites();
     }
 
+    const drops = reconcileFavoritePrices();
+
     if (skeleton) skeleton.style.display = 'none';
     catalog.style.display = 'grid';
 
     renderCatalog();
+    renderRecent();
     updateCategoryVisibility();
     updateUI();
     updateFavoriteUI();
     updateStoreStatus();
     handleDeepLink();
+
+    if (drops > 0) {
+      notifyPriceDrops(drops);
+    }
   }
 }
 
@@ -1075,43 +2184,43 @@ function updateCategoryVisibility() {
 function updateStoreStatus() {
   const chip = document.getElementById('storeStatusChip');
   const text = document.getElementById('storeStatusText');
-  if (!chip || !text) return;
+  if (chip && text) {
+    const minutes = getStoreMinutes();
+    const isOpen = minutes >= STORE_OPEN_HOUR * 60 && minutes < STORE_CLOSE_HOUR * 60;
+    const timeLeft = STORE_CLOSE_HOUR * 60 - minutes;
 
-  let minutes = null;
-
-  try {
-    const parts = new Intl.DateTimeFormat('ru-RU', {
-      timeZone: STORE_TIMEZONE,
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false
-    }).formatToParts(new Date());
-
-    const hours = Number(parts.find(part => part.type === 'hour')?.value);
-    const mins = Number(parts.find(part => part.type === 'minute')?.value);
-
-    if (Number.isFinite(hours) && Number.isFinite(mins)) minutes = hours * 60 + mins;
-  } catch (error) {
-    const now = new Date();
-    minutes = now.getHours() * 60 + now.getMinutes();
+    if (isOpen) {
+      chip.classList.remove('closed');
+      text.textContent = timeLeft <= 60
+        ? `ОТКРЫТО ЕЩЁ ${timeLeft} МИН · БАРНАУЛ`
+        : `ОТКРЫТО ДО ${STORE_CLOSE_HOUR}:00 · БАРНАУЛ`;
+    } else {
+      chip.classList.add('closed');
+      text.textContent = `ЗАКРЫТО · ОТКРОЕМСЯ В ${STORE_OPEN_HOUR}:00 · БАРНАУЛ`;
+    }
   }
 
-  if (minutes == null) {
-    text.textContent = '10:00–21:00';
-    return;
+  const todayText = document.getElementById('pickupTodayText');
+  if (todayText) {
+    todayText.textContent = isStoreOpen() ? 'Самовывоз сегодня' : `Самовывоз с ${STORE_OPEN_HOUR}:00`;
   }
 
-  const isOpen = minutes >= 10 * 60 && minutes < 21 * 60;
-  const timeLeft = 21 * 60 - minutes;
+  const nowEl = document.getElementById('pickupNow');
+  if (nowEl) {
+    const time = formatStoreTime();
+    nowEl.textContent = isStoreOpen()
+      ? `Сейчас в Барнауле ${time} · открыто до ${STORE_CLOSE_HOUR}:00`
+      : `Сейчас в Барнауле ${time} · откроемся в ${STORE_OPEN_HOUR}:00`;
+    nowEl.classList.toggle('closed', !isStoreOpen());
+  }
 
-  if (isOpen) {
-    chip.classList.remove('closed');
-    text.textContent = timeLeft <= 60
-      ? `ОТКРЫТО · ЗАКРОЕМСЯ ЧЕРЕЗ ${timeLeft} МИН`
-      : 'ОТКРЫТО ДО 21:00';
-  } else {
-    chip.classList.add('closed');
-    text.textContent = 'ЗАКРЫТО · ОТКРОЕМСЯ В 10:00';
+  const closedHint = document.getElementById('checkoutClosedHint');
+  if (closedHint) {
+    const open = isStoreOpen();
+    closedHint.hidden = open;
+    if (!open) {
+      closedHint.textContent = `Сейчас магазин закрыт (${formatStoreTime()} по Барнаулу). Заказ можно оставить — ответим после ${STORE_OPEN_HOUR}:00.`;
+    }
   }
 }
 
@@ -1215,7 +2324,7 @@ function getFilteredProducts() {
   return list;
 }
 
-function buildProductCard(product) {
+function buildProductCard(product, options = {}) {
   const images = getProductImages(product);
   const img1 = images[0];
   const subImages = images.slice(1, 3);
@@ -1223,6 +2332,7 @@ function buildProductCard(product) {
   const isOutOfStock = stock <= 0;
   const active = isFavorite(product.id);
   const safeTitle = escapeHtml(product.title);
+  const priceDrop = Number(options.priceDrop) || 0;
   const giftShort = product.gift_short
     ? String(product.gift_short).trim()
     : (product.gift_desc ? String(product.gift_desc).replace('🎁', '').trim() : '');
@@ -1250,7 +2360,7 @@ function buildProductCard(product) {
     <div class="card ${isOutOfStock ? 'card-out-of-stock' : ''}" data-id="${product.id}">
       <button type="button" class="card-hitbox" aria-label="Открыть товар: ${safeTitle}"></button>
       <div class="card-image-wrapper">
-        <div class="card-badges">${getBadgesHtml(product)}</div>
+        <div class="card-badges">${getBadgesHtml(product)}${priceDrop > 0 ? `<span class="badge-tag price-drop" title="Было ${formatPrice(product.price + priceDrop)}">ПОДЕШЕВЕЛ</span>` : ''}</div>
         <button type="button" class="card-fav ${active ? 'active' : ''}" data-fav="${product.id}"
                 data-title="${safeTitle}" aria-pressed="${active}"
                 aria-label="${active ? 'Убрать из избранного' : 'Добавить в избранное'}: ${safeTitle}">
@@ -1298,7 +2408,7 @@ function renderCatalog() {
     return;
   }
 
-  catalog.innerHTML = filtered.map(buildProductCard).join('');
+  catalog.innerHTML = filtered.map(product => buildProductCard(product)).join('');
   animateCatalogCards();
 }
 
@@ -1406,6 +2516,7 @@ function openProduct(id) {
   const scroller = modal?.querySelector('.product-modal');
   const gallery = document.getElementById('productGallery');
   const dotsContainer = document.getElementById('galleryDots');
+  const thumbsContainer = document.getElementById('galleryThumbs');
   const counter = document.getElementById('galleryCounter');
   const badges = document.getElementById('productBadges');
   const descEl = document.getElementById('productDesc');
@@ -1431,20 +2542,54 @@ function openProduct(id) {
   counter.hidden = images.length <= 1;
   counter.textContent = images.length > 1 ? `1 / ${images.length}` : '';
 
+  // Миниатюры под галереей — только если фото больше одного
+  if (thumbsContainer) {
+    thumbsContainer.hidden = images.length <= 1;
+    thumbsContainer.innerHTML = images.length > 1
+      ? images.map((src, index) => `
+        <button type="button" class="gallery-thumb ${index === 0 ? 'active' : ''}" data-index="${index}"
+                role="tab" aria-selected="${index === 0}" aria-label="Фото ${index + 1}">
+          <img src="${src}" alt="" loading="lazy" decoding="async"
+               onerror="this.onerror=null;this.src='${NO_PHOTO}'">
+        </button>`).join('')
+      : '';
+  }
+
   const dots = Array.from(dotsContainer.querySelectorAll('.gallery-dot'));
+  const thumbs = thumbsContainer ? Array.from(thumbsContainer.querySelectorAll('.gallery-thumb')) : [];
   let currentIndex = 0;
 
   gallery.onscroll = () => {
     const width = gallery.clientWidth || 1;
     const index = Math.max(0, Math.min(images.length - 1, Math.round(gallery.scrollLeft / width)));
-    if (index !== currentIndex) currentIndex = index;
+    if (index !== currentIndex) {
+      currentIndex = index;
+      if (thumbsContainer && thumbs[index]) {
+        const thumb = thumbs[index];
+        thumbsContainer.scrollTo({
+          left: thumb.offsetLeft - (thumbsContainer.clientWidth - thumb.clientWidth) / 2,
+          behavior: 'smooth'
+        });
+      }
+    }
     dots.forEach((dot, i) => dot.classList.toggle('active', i === index));
+    thumbs.forEach((thumb, i) => {
+      thumb.classList.toggle('active', i === index);
+      thumb.setAttribute('aria-selected', String(i === index));
+    });
     if (images.length > 1) counter.textContent = `${index + 1} / ${images.length}`;
   };
 
   dots.forEach(dot => {
     dot.addEventListener('click', () => {
       const index = Number(dot.dataset.index);
+      gallery.scrollTo({ left: gallery.clientWidth * index, behavior: 'smooth' });
+    });
+  });
+
+  thumbs.forEach(thumb => {
+    thumb.addEventListener('click', () => {
+      const index = Number(thumb.dataset.index);
       gallery.scrollTo({ left: gallery.clientWidth * index, behavior: 'smooth' });
     });
   });
@@ -1470,6 +2615,9 @@ function openProduct(id) {
   renderProductGift(product);
 
   currentProductId = Number(product.id);
+  addRecentProduct(product.id);
+  renderSimilar(product);
+  updateProductSeo(product);
 
   const managerBtn = document.getElementById('askManagerBtn');
   if (managerBtn) managerBtn.onclick = () => openManagerChat(product);
@@ -1485,6 +2633,12 @@ function openProduct(id) {
   addToCartBtn.onclick = () => {
     if (addToCart(product.id)) closeModal(modal);
   };
+
+  const stockNotifyBtn = document.getElementById('stockNotifyBtn');
+  if (stockNotifyBtn) {
+    stockNotifyBtn.hidden = stock > 0;
+    stockNotifyBtn.onclick = () => openStockNotify(product);
+  }
 
   // Описание загружаем в фоне, чтобы карточка открывалась мгновенно
   if (descRequest) descRequest.abort();
@@ -1686,6 +2840,7 @@ function updateCartBadge() {
 function updateUI() {
   updateCartBadge();
   renderCartItems();
+  updateOrderBadge();
 }
 
 function renderCartItems() {
@@ -1720,7 +2875,10 @@ function renderCartItems() {
               ${escapeHtml(item.title)}
               ${stock <= 0 ? '<span class="cart-item-preorder">(под заказ)</span>' : ''}
             </div>
-            <div class="cart-item-price">${formatPrice(item.price)}</div>
+            <div class="cart-item-price-row">
+              <span class="cart-item-price">${formatPrice(item.price)}</span>
+              <span class="cart-item-line-total">${formatPrice(Number(item.price) * Number(item.qty))}</span>
+            </div>
             ${giftText ? `<div class="cart-item-gift">🎁 Подарок: ${escapeHtml(giftText)}</div>` : ''}
             <div class="cart-item-controls">
               <button class="qty-btn" onclick="updateQty(${item.id}, -1)" aria-label="Уменьшить количество">−</button>
@@ -1745,6 +2903,14 @@ function renderCartItems() {
   setText('subtotal', formatPrice(totals.subtotal));
   setText('delivery', 'БЕСПЛАТНО');
   setText('totalPrice', formatPrice(totals.total));
+
+  const cartCount = cart.reduce((sum, item) => sum + item.qty, 0);
+  const headerCount = document.getElementById('cartHeaderCount');
+  if (headerCount) {
+    headerCount.textContent = cart.length
+      ? `${cartCount} ${plural(cartCount, 'товар', 'товара', 'товаров')} · ${formatPrice(totals.total)}`
+      : 'Пока пусто';
+  }
 
   const promoRow = document.getElementById('promoDiscountRow');
   const promoApplyRow = document.getElementById('promoApplyRow');
@@ -1772,6 +2938,12 @@ function renderCartItems() {
   const clearCartBtn = document.getElementById('clearCartBtn');
   if (checkoutBtn) checkoutBtn.disabled = cart.length === 0;
   if (clearCartBtn) clearCartBtn.disabled = cart.length === 0;
+
+  const pendingOrder = orders.find(order => order.status === 'awaiting');
+  const pendingHint = document.getElementById('pendingOrderHint');
+  const pendingId = document.getElementById('pendingOrderId');
+  if (pendingHint) pendingHint.hidden = !pendingOrder;
+  if (pendingOrder && pendingId) pendingId.textContent = pendingOrder.id;
 }
 
 function clearCart() {
@@ -1797,58 +2969,250 @@ function clearCart() {
   });
 }
 
-function checkout() {
+function orderMatchesCart(order) {
+  if (!order || !Array.isArray(order.items) || order.items.length !== cart.length) return false;
+
+  return cart.every(item => {
+    const line = order.items.find(entry => Number(entry.id) === Number(item.id));
+    return Boolean(line)
+      && Number(line.qty) === Number(item.qty)
+      && Number(line.price) === Number(item.price);
+  });
+}
+
+function getCheckoutCustomer() {
+  return safeLoadJson('pf_customer', {});
+}
+
+function renderCheckoutSummary() {
+  const summary = document.getElementById('checkoutSummary');
+  if (!summary) return;
+
+  const totals = getCartTotals();
+  const count = cart.reduce((sum, item) => sum + Number(item.qty || 0), 0);
+  const discount = (totals.qtyDiscountAmount || 0) + (totals.promoDiscountAmount || 0);
+  const method = document.querySelector('input[name="delivery"]:checked')?.value || 'pickup';
+
+  const deliveryNote = method === 'pickup'
+    ? 'Самовывоз бесплатно · Павловский тракт, 307к3'
+    : method === 'city'
+      ? 'Доставка по Барнаулу бесплатно'
+      : 'Доставку по России подтвердит менеджер';
+
+  summary.innerHTML = `
+    <div class="checkout-summary-line">
+      <span>${count} ${plural(count, 'товар', 'товара', 'товаров')}</span>
+      <strong>${formatPrice(totals.total)}</strong>
+    </div>
+    <div class="checkout-summary-note">
+      ${discount > 0 ? `Скидки: −${formatPrice(discount)} · ` : ''}${deliveryNote}
+    </div>`;
+}
+
+function updateCheckoutAddressField() {
+  const field = document.getElementById('checkoutAddressField');
+  const address = document.getElementById('checkoutAddress');
+  if (!field || !address) return;
+
+  const method = document.querySelector('input[name="delivery"]:checked')?.value || 'pickup';
+  field.hidden = method === 'pickup';
+  address.required = method === 'russia';
+  address.placeholder = method === 'city'
+    ? 'Адрес в Барнауле (можно уточнить в чате)'
+    : 'Город, улица, дом, квартира или пункт выдачи';
+}
+
+function clearCheckoutError() {
+  const error = document.getElementById('checkoutError');
+  if (!error) return;
+  error.hidden = true;
+  error.textContent = '';
+}
+
+function showCheckoutError(message, field) {
+  const error = document.getElementById('checkoutError');
+  if (error) {
+    error.textContent = message;
+    error.hidden = false;
+  }
+
+  [document.getElementById('checkoutName'), document.getElementById('checkoutPhone'), document.getElementById('checkoutAddress')]
+    .forEach(el => el?.classList.remove('invalid'));
+
+  if (field) {
+    field.classList.add('invalid');
+    field.focus();
+    triggerHaptic('error');
+  }
+  playSound('error');
+}
+
+function prefillCheckoutForm() {
+  const saved = getCheckoutCustomer();
+  const name = document.getElementById('checkoutName');
+  const phone = document.getElementById('checkoutPhone');
+  const address = document.getElementById('checkoutAddress');
+  const comment = document.getElementById('checkoutComment');
+
+  if (name && !name.value) name.value = saved.name || currentUser?.first_name || '';
+  if (phone && !phone.value) phone.value = saved.phone || '';
+  if (address && !address.value) address.value = saved.address || '';
+  if (comment) comment.value = '';
+
+  const method = ['city', 'russia'].includes(saved.delivery) ? saved.delivery : 'pickup';
+  const radio = document.querySelector(`input[name="delivery"][value="${method}"]`);
+  if (radio) radio.checked = true;
+
+  updateCheckoutAddressField();
+  clearCheckoutError();
+  [name, phone, address].forEach(el => el?.classList.remove('invalid'));
+}
+
+function openCheckout() {
   if (!cart.length) {
     showToast('Корзина пуста', 'error');
     return;
   }
 
+  renderCheckoutSummary();
+  prefillCheckoutForm();
+  updateStoreStatus();
+
+  closeModal('cartModal');
+  openModal('checkoutModal');
+
+  playSound('tap');
+  triggerHaptic('selection');
+
+  setTimeout(() => document.getElementById('checkoutName')?.focus(), 160);
+}
+
+function submitCheckout(event) {
+  event?.preventDefault();
+
+  if (!cart.length) {
+    closeModal('checkoutModal');
+    showToast('Корзина пуста', 'error');
+    return;
+  }
+
+  const nameEl = document.getElementById('checkoutName');
+  const phoneEl = document.getElementById('checkoutPhone');
+  const addressEl = document.getElementById('checkoutAddress');
+  const commentEl = document.getElementById('checkoutComment');
+
+  const name = String(nameEl?.value || '').trim();
+  const phone = String(phoneEl?.value || '').trim();
+  const phoneDigits = phone.replace(/\D/g, '');
+  const method = document.querySelector('input[name="delivery"]:checked')?.value || 'pickup';
+  const address = String(addressEl?.value || '').trim();
+  const comment = String(commentEl?.value || '').trim();
+
+  if (name.length < 2) {
+    showCheckoutError('Укажите имя — так менеджеру будет проще к вам обратиться.', nameEl);
+    return;
+  }
+
+  if (phoneDigits.length < 10 || phoneDigits.length > 15) {
+    showCheckoutError('Проверьте телефон: нужно от 10 до 15 цифр.', phoneEl);
+    return;
+  }
+
+  if (method === 'russia' && address.length < 5) {
+    showCheckoutError('Для отправки по России укажите город и адрес или пункт выдачи.', addressEl);
+    return;
+  }
+
+  clearCheckoutError();
+
+  const customer = { name, phone, delivery: method, address, comment };
+
+  try {
+    localStorage.setItem('pf_customer', JSON.stringify({
+      name,
+      phone,
+      delivery: method,
+      address,
+      updatedAt: new Date().toISOString()
+    }));
+  } catch (error) {
+    // данные просто не сохранятся для следующего раза
+  }
+
+  closeModal('checkoutModal');
+  checkout(customer);
+}
+
+function checkout(customer = null) {
+  if (!cart.length) {
+    showToast('Корзина пуста', 'error');
+    return false;
+  }
+
   const totals = getCartTotals();
-  const lines = [];
+  const items = cart.map(item => ({ ...item }));
 
-  cart.forEach(item => {
-    lines.push(`• ${item.title}${Number(item.stock) <= 0 ? ' (под заказ)' : ''}`);
-    lines.push(`  ${item.qty} шт. × ${formatPrice(item.price)} = ${formatPrice(Number(item.price) * item.qty)}`);
-    if (item.gift_desc) lines.push(`  🎁 Подарок: ${String(item.gift_desc).replace('🎁', '').trim()}`);
-  });
+  // Если такой же заказ уже ждёт подтверждения — не плодим дубли.
+  let order = orders.find(entry => entry.status === 'awaiting' && orderMatchesCart(entry));
 
-  let discountText = '';
-  if (appliedPromoPercent > 0) {
-    discountText += `\nПромокод: ${myPromoCode} (-${formatPrice(totals.promoDiscountAmount)})`;
+  if (!order) {
+    // Старые неотправленные черновики помечаем отменёнными, а не удаляем:
+    // так история остаётся честной, а промокод не применяется дважды.
+    const superseded = orders.filter(entry => entry.status === 'awaiting');
+    if (superseded.length) {
+      const now = new Date().toISOString();
+      orders = orders.map(entry => {
+        if (entry.status !== 'awaiting') return entry;
+        return {
+          ...entry,
+          status: 'canceled',
+          updatedAt: now,
+          cancelNote: 'Заменён новым заказом'
+        };
+      });
+      superseded.forEach(entry => syncOrderStatus({ ...entry, status: 'canceled' }));
+    }
+
+    order = createOrderRecord(totals, items, customer);
+    order.message = buildOrderMessage(order);
+    orders.unshift(order);
+  } else if (customer) {
+    // Повторное оформление того же состава: обновляем контакты и способ получения.
+    order.customer = {
+      name: String(customer.name || '').trim(),
+      phone: String(customer.phone || '').trim()
+    };
+    order.delivery = {
+      method: ['pickup', 'city', 'russia'].includes(customer.delivery) ? customer.delivery : 'pickup',
+      address: String(customer.address || '').trim(),
+      comment: String(customer.comment || '').trim()
+    };
+    order.updatedAt = new Date().toISOString();
+    order.message = buildOrderMessage(order);
   }
-  if (totals.hasQtyDiscount) {
-    discountText += `\nСкидка за количество (5%): -${formatPrice(totals.qtyDiscountAmount)}`;
-  }
 
-  const orderId = `PF-${Date.now().toString(36).toUpperCase().slice(-5)}`;
-  const date = new Date().toLocaleString('ru-RU', {
-    day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
-  });
+  saveOrders();
+  syncOrder(order);
+  updateOrderBadge();
+  renderOrders();
+  renderCartItems();
 
-  const text = `Здравствуйте! Заказ ${orderId} в ${STORE_NAME} (${date}):\n\n${lines.join('\n')}${discountText}\n\nДоставка по городу: Бесплатно\nИтого: ${formatPrice(totals.total)}`;
+  openTelegramLink(orderTelegramUrl(order));
 
-  // Промокод одноразовый: фиксируем использование после формирования заказа
-  if (appliedPromoPercent > 0) {
-    promoUsed = true;
-    appliedPromoPercent = 0;
-    localStorage.setItem('pf_promo_used', 'true');
-    localStorage.setItem('pf_promo_applied', '0');
-    updateUI();
-  }
+  playSound('tap');
+  triggerHaptic('medium');
 
-  const url = `https://t.me/${TELEGRAM_USERNAME}?text=${encodeURIComponent(text)}`;
-  if (tg?.openTelegramLink) tg.openTelegramLink(url);
-  else window.open(url, '_blank', 'noopener');
-
-  showToast('Заказ сформирован — отправьте сообщение в Telegram', 'success');
-  playSound('success');
-  triggerHaptic('success');
   showNotification({
-    title: 'Заказ сформирован',
-    text: `${orderId} · ${formatPrice(totals.total)}`,
+    title: 'Подтвердите отправку',
+    text: `${order.id} · ${formatPrice(order.total)}`,
     type: 'order',
-    duration: 3200
+    duration: 4200,
+    onClick: openOrders
   });
+
+  // Заказ не считается отправленным, пока пользователь не подтвердит это
+  setTimeout(() => askOrderConfirmation(order.id), 600);
+  return true;
 }
 
 // ============================================================
@@ -1927,6 +3291,17 @@ function openInfoModal(type) {
       </div>
       <button class="info-btn" onclick="closeModal('infoModal')">МНЕ НРАВИТСЯ!</button>
     `;
+  } else if (type === 'install') {
+    body.innerHTML = `
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" style="margin-bottom:16px;" aria-hidden="true"><rect x="5" y="2" width="14" height="20" rx="2"></rect><line x1="12" y1="18" x2="12.01" y2="18"></line></svg>
+      <div class="info-title">Установить PF Store</div>
+      <div class="info-text">
+        <b>Android / Chrome:</b> меню ⋮ → «Установить приложение» или «Добавить на главный экран».<br><br>
+        <b>iPhone / Safari:</b> кнопка «Поделиться» → «На экран “Домой”».<br><br>
+        После установки магазин открывается с главного экрана как обычное приложение.
+      </div>
+      <button class="info-btn" onclick="closeModal('infoModal')">ПОНЯТНО</button>
+    `;
   }
 
   openModal(modal);
@@ -1947,6 +3322,175 @@ function loadReviews() {
          onclick="openLightbox('${src}', 'Отзыв клиента ${index + 1}')"
          onerror="this.remove()">
   `).join('');
+}
+
+function openReviewPrompt() {
+  const url = `${location.origin}${location.pathname}`;
+  const text = `Здравствуйте! Хочу оставить отзыв о PF Store. Что нужно прислать? Ссылка на магазин: ${url}`;
+  openTelegramLink(`https://t.me/${TELEGRAM_USERNAME}?text=${encodeURIComponent(text)}`);
+  playSound('tap');
+  triggerHaptic('selection');
+  showToast('Откроется чат с менеджером', 'success');
+}
+
+// ============================================================
+// SEO: ДИНАМИЧЕСКИЕ МЕТА-ТЕГИ
+// ============================================================
+
+const DEFAULT_SEO = {
+  title: 'PF Store — электроника с проверкой перед покупкой',
+  description: 'PF Store — часы, наушники, очки и аксессуары. Гарантия 14 дней, проверка товара перед покупкой, бесплатная доставка по Барнаулу и отправка по всей России.',
+  image: './images/banner.jpg'
+};
+
+function absoluteUrl(path) {
+  try {
+    return new URL(path, location.href).href;
+  } catch (error) {
+    return path;
+  }
+}
+
+function setMeta(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.setAttribute('content', value);
+}
+
+function getProductSeoDescription(product) {
+  const raw = String(product.desc || product.gift_desc || '').replace(/\s+/g, ' ').trim();
+  if (raw) return raw.slice(0, 155);
+
+  return `${product.title} — ${formatPrice(product.price)} в PF Store. Проверка при получении, гарантия 14 дней, самовывоз в Барнауле и отправка по России.`;
+}
+
+function updateProductSeo(product) {
+  if (!product) return;
+
+  const title = `${product.title} — купить в PF Store, Барнаул`;
+  const description = getProductSeoDescription(product);
+  const images = getProductImages(product);
+  const image = absoluteUrl(images[0]);
+  const url = `${location.origin}${location.pathname}?product=${product.id}`;
+
+  document.title = title;
+  setMeta('metaDescription', description);
+  setMeta('ogTitle', title);
+  setMeta('ogDescription', description);
+  setMeta('ogImage', image);
+  setMeta('ogUrl', url);
+  setMeta('twitterTitle', title);
+  setMeta('twitterDescription', description);
+  setMeta('twitterImage', image);
+
+  const canonical = document.getElementById('canonicalLink');
+  if (canonical) canonical.setAttribute('href', url);
+
+  const stock = Number(product.stock) || 0;
+  const data = {
+    '@context': 'https://schema.org',
+    '@type': 'Product',
+    name: product.title,
+    image: images.map(absoluteUrl),
+    description,
+    sku: String(product.id),
+    brand: { '@type': 'Brand', name: 'PF Store' },
+    offers: {
+      '@type': 'Offer',
+      url,
+      priceCurrency: 'RUB',
+      price: Number(product.price) || 0,
+      itemCondition: 'https://schema.org/NewCondition',
+      availability: stock > 0 ? 'https://schema.org/InStock' : 'https://schema.org/PreOrder',
+      seller: { '@type': 'Organization', name: 'PF Store' }
+    }
+  };
+
+  let script = document.getElementById('productJsonLd');
+  if (!script) {
+    script = document.createElement('script');
+    script.type = 'application/ld+json';
+    script.id = 'productJsonLd';
+    document.head.appendChild(script);
+  }
+  script.textContent = JSON.stringify(data);
+}
+
+function resetProductSeo() {
+  document.title = DEFAULT_SEO.title;
+  setMeta('metaDescription', DEFAULT_SEO.description);
+  setMeta('ogTitle', DEFAULT_SEO.title);
+  setMeta('ogDescription', DEFAULT_SEO.description);
+  setMeta('ogImage', absoluteUrl(DEFAULT_SEO.image));
+  setMeta('ogUrl', absoluteUrl('./'));
+  setMeta('twitterTitle', DEFAULT_SEO.title);
+  setMeta('twitterDescription', DEFAULT_SEO.description);
+  setMeta('twitterImage', absoluteUrl(DEFAULT_SEO.image));
+
+  const canonical = document.getElementById('canonicalLink');
+  if (canonical) canonical.setAttribute('href', absoluteUrl('./'));
+
+  document.getElementById('productJsonLd')?.remove();
+}
+
+// ============================================================
+// PWA
+// ============================================================
+
+function updateInstallButton() {
+  const btn = document.getElementById('profileInstallBtn');
+  if (!btn) return;
+
+  const standalone = window.matchMedia('(display-mode: standalone)').matches
+    || navigator.standalone === true;
+  const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  const inTelegram = isTelegramEnvironment();
+
+  btn.hidden = standalone || inTelegram || (!installPromptEvent && !isIos);
+}
+
+function initPwa() {
+  window.addEventListener('beforeinstallprompt', event => {
+    event.preventDefault();
+    installPromptEvent = event;
+    updateInstallButton();
+  });
+
+  window.addEventListener('appinstalled', () => {
+    installPromptEvent = null;
+    updateInstallButton();
+    showToast('PF Store установлен на главный экран', 'success');
+  });
+
+  updateInstallButton();
+
+  if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./sw.js').catch(error => {
+        console.warn('Service worker не зарегистрирован:', error);
+      });
+    });
+  }
+}
+
+async function promptInstall() {
+  if (!installPromptEvent) {
+    openInfoModal('install');
+    return;
+  }
+
+  const event = installPromptEvent;
+  installPromptEvent = null;
+  updateInstallButton();
+
+  try {
+    await event.prompt();
+    const choice = await event.userChoice;
+    if (choice?.outcome === 'accepted') {
+      showToast('Спасибо! Приложение установлено', 'success');
+    }
+  } catch (error) {
+    openInfoModal('install');
+  }
 }
 
 // ============================================================
@@ -2002,6 +3546,7 @@ function setView(view) {
   if (view === 'about') loadReviews();
   if (view === 'favorites') renderFavorites();
   if (view === 'home' && productsLoaded) renderCatalog();
+  renderRecent();
 
   window.scrollTo(0, 0);
   syncHeaderHeight();
@@ -2088,12 +3633,87 @@ function bindEvents() {
 
   // Профиль
   document.getElementById('myPromoBtn')?.addEventListener('click', () => openInfoModal('promo'));
+
+  document.querySelectorAll('.profile-item[role="button"]').forEach(item => {
+    item.addEventListener('keydown', event => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        item.click();
+      }
+    });
+  });
+
+  const telegramLine = document.getElementById('profileTelegramLine');
+  telegramLine?.addEventListener('keydown', event => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      telegramLine.click();
+    }
+  });
+  document.getElementById('profileOrdersBtn')?.addEventListener('click', openOrders);
   document.getElementById('profileCartBtn')?.addEventListener('click', openCart);
   document.getElementById('profileFavoritesBtn')?.addEventListener('click', openFavorites);
+  document.getElementById('profileTelegramLine')?.addEventListener('click', () => {
+    if (currentUser) return;
+    if (TELEGRAM_BOT_USERNAME) {
+      openTelegramLink(`https://t.me/${TELEGRAM_BOT_USERNAME}?startapp`);
+      return;
+    }
+    showToast('Имя и аватар — только в мини-приложении Telegram', 'error');
+  });
   document.getElementById('profileManagerBtn')?.addEventListener('click', () => {
     const url = `https://t.me/${TELEGRAM_USERNAME}`;
     if (tg?.openTelegramLink) tg.openTelegramLink(url);
     else window.open(url, '_blank', 'noopener');
+  });
+
+  // Заказы
+  document.getElementById('closeOrders')?.addEventListener('click', () => closeModal('ordersModal'));
+  document.getElementById('ordersBody')?.addEventListener('click', event => {
+    const button = event.target.closest('[data-order-action]');
+    if (!button) return;
+
+    const action = button.dataset.orderAction;
+    const orderId = button.dataset.orderId;
+
+    if (action === 'shop') {
+      closeModal('ordersModal');
+      setView('home');
+      return;
+    }
+    if (action === 'copy') {
+      copyText(orderId)
+        .then(() => showToast('Номер заказа скопирован', 'success'))
+        .catch(() => showToast('Не удалось скопировать номер', 'error'));
+      return;
+    }
+    if (action === 'sent') {
+      askOrderConfirmation(orderId);
+      return;
+    }
+    if (action === 'resend') {
+      resendOrder(orderId);
+      return;
+    }
+    if (action === 'reorder') {
+      reorder(orderId);
+      return;
+    }
+    if (action === 'awaiting' || action === 'canceled' || action === 'delivered') {
+      setOrderStatus(orderId, action);
+    }
+  });
+
+  // Карта самовывоза: iframe подключается только после нажатия
+  document.getElementById('pickupMapBtn')?.addEventListener('click', () => {
+    const container = document.getElementById('pickupMap');
+    if (!container) return;
+
+    const address = 'Барнаул, Павловский тракт, 307к3';
+    const src = `https://yandex.ru/map-widget/v1/?text=${encodeURIComponent(address)}&z=16`;
+    container.innerHTML = `<iframe src="${src}" title="Карта: ${address}" loading="lazy" allowfullscreen referrerpolicy="no-referrer-when-downgrade"></iframe>`;
+    playSound('tap');
+    triggerHaptic('selection');
   });
 
   // Избранное
@@ -2162,14 +3782,43 @@ function bindEvents() {
     });
   });
 
-  // Escape
-  document.addEventListener('keydown', event => {
-    if (event.key === 'Escape') closeTopModal();
-  });
+  // Escape и удержание фокуса внутри модалок
+  document.addEventListener('keydown', handleGlobalKeydown);
 
   // Оформление заказа
-  document.getElementById('checkoutBtn')?.addEventListener('click', checkout);
+  document.getElementById('checkoutBtn')?.addEventListener('click', openCheckout);
+  document.getElementById('checkoutForm')?.addEventListener('submit', submitCheckout);
+  document.getElementById('closeCheckout')?.addEventListener('click', () => closeModal('checkoutModal'));
+  document.querySelectorAll('input[name="delivery"]').forEach(radio => {
+    radio.addEventListener('change', () => {
+      updateCheckoutAddressField();
+      renderCheckoutSummary();
+    });
+  });
   document.getElementById('clearCartBtn')?.addEventListener('click', clearCart);
+  document.getElementById('pendingOrderHint')?.addEventListener('click', () => {
+    closeModal('cartModal');
+    openOrders();
+  });
+
+  // Недавно просмотренные
+  document.getElementById('recentList')?.addEventListener('click', event => {
+    const card = event.target.closest('[data-recent]');
+    if (!card) return;
+    openProduct(Number(card.dataset.recent));
+  });
+  document.getElementById('clearRecentBtn')?.addEventListener('click', clearRecent);
+
+  // Похожие товары
+  document.getElementById('similarList')?.addEventListener('click', event => {
+    const card = event.target.closest('[data-similar]');
+    if (!card) return;
+    openProduct(Number(card.dataset.similar));
+  });
+
+  // Отзывы и установка приложения
+  document.getElementById('reviewCta')?.addEventListener('click', openReviewPrompt);
+  document.getElementById('profileInstallBtn')?.addEventListener('click', promptInstall);
 
   // Фильтры
   document.getElementById('filterBtn')?.addEventListener('click', () => openModal('filterModal'));
@@ -2337,11 +3986,15 @@ function bindEvents() {
 
 safeLoadCart();
 generatePromoCode();
+orders = safeLoadOrders();
+recentIds = safeLoadRecent();
+priceDrops = safeLoadJson('pf_price_drops', {});
 
 document.addEventListener('DOMContentLoaded', () => {
   updateGreeting(null);
   updateSoundToggle();
   initTelegram();
+  initPwa();
   initSlider();
   bindEvents();
   syncHeaderHeight();
@@ -2349,9 +4002,30 @@ document.addEventListener('DOMContentLoaded', () => {
   updateFavoriteBadge();
   updateScrollProgress();
   updateStoreStatus();
+  updateOrderBadge();
+  applyManagerUI();
   updateUI();
+  resetProductSeo();
+  renderRecent();
+  document.querySelectorAll('.modal').forEach(modal => {
+    if (!modal.classList.contains('active')) modal.setAttribute('aria-hidden', 'true');
+  });
   loadProducts();
-  window.addEventListener('load', syncHeaderHeight);
+  loadOrdersFromServer();
+
+  try {
+    const shortcutView = new URLSearchParams(location.search).get('view');
+    if (shortcutView === 'cart' && !new URLSearchParams(location.search).get('product')) {
+      setTimeout(openCart, 500);
+    }
+  } catch (error) {
+    // некорректная ссылка не должна мешать загрузке
+  }
+
+  window.addEventListener('load', () => {
+    syncHeaderHeight();
+    initTelegram();
+  });
 });
 
 // Функции, которые вызываются из разметки
