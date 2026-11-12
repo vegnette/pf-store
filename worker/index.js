@@ -24,6 +24,8 @@ const CORS = {
 };
 
 const MAX_AUTH_AGE_SECONDS = 24 * 60 * 60;
+const STORE_URL = 'https://vegnette.github.io/pf-store/';
+const MANAGER_USERNAME = 'PF_Store_manager';
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -126,14 +128,17 @@ async function listOrders(env) {
   return orders.filter(Boolean);
 }
 
-async function sendTelegram(env, token, chatId, text) {
+async function sendTelegram(env, token, chatId, text, replyMarkup) {
   if (!token || !chatId) return false;
 
   try {
+    const payloadBody = { chat_id: chatId, text, disable_web_page_preview: true };
+    if (replyMarkup) payloadBody.reply_markup = replyMarkup;
+
     const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chatId, text, disable_web_page_preview: true })
+      body: JSON.stringify(payloadBody)
     });
     const payload = await response.json().catch(() => null);
 
@@ -147,6 +152,11 @@ async function sendTelegram(env, token, chatId, text) {
     console.error('telegram_send_error', error.message);
     return false;
   }
+}
+
+// Уведомления менеджеру идут от основного бота магазина, если он подключён.
+function managerToken(env) {
+  return env.BOT_TOKEN_MAIN || env.BOT_TOKEN;
 }
 
 async function notifyManager(env, order) {
@@ -178,7 +188,7 @@ async function notifyManager(env, order) {
     if (order.delivery.comment) lines.push(`Комментарий: ${order.delivery.comment}`);
   }
 
-  await sendTelegram(env, env.BOT_TOKEN, env.MANAGER_CHAT_ID, lines.join('\n'));
+  await sendTelegram(env, managerToken(env), env.MANAGER_CHAT_ID, lines.join('\n'));
 }
 
 // --- НАЛИЧИЕ ---
@@ -254,7 +264,7 @@ async function sendDailyReport(env) {
   ].join('.');
 
   if (!today.length) {
-    await sendTelegram(env, env.BOT_TOKEN, env.MANAGER_CHAT_ID, `📊 ${date}\nЗаказов сегодня не было.`);
+    await sendTelegram(env, managerToken(env), env.MANAGER_CHAT_ID, `📊 ${date}\nЗаказов сегодня не было.`);
     return;
   }
 
@@ -282,7 +292,46 @@ async function sendDailyReport(env) {
   if (top) lines.push(`Топ товар: ${top[0]} × ${top[1]}`);
   if (awaiting) lines.push(`Ждут подтверждения: ${awaiting}`);
 
-  await sendTelegram(env, env.BOT_TOKEN, env.MANAGER_CHAT_ID, lines.join('\n'));
+  await sendTelegram(env, managerToken(env), env.MANAGER_CHAT_ID, lines.join('\n'));
+}
+
+async function handleTelegramUpdate(env, update) {
+  const message = update.message || update.edited_message;
+  if (!message || !message.chat?.id) return;
+
+  const text = String(message.text || '').trim();
+  const command = text.startsWith('/')
+    ? text.slice(1).split(/[\s@]/)[0].toLowerCase()
+    : '';
+
+  const openStoreKeyboard = {
+    inline_keyboard: [[{ text: '🛍 Открыть магазин', web_app: { url: STORE_URL } }]]
+  };
+
+  let reply;
+
+  if (command === 'start') {
+    reply = [
+      'Добро пожаловать в PF Store 👋',
+      '',
+      'Здесь можно посмотреть каталог, оформить заказ и следить за статусом.',
+      'Откройте магазин кнопкой ниже — так вы увидите свои заказы и сможете получать уведомления.'
+    ].join('\n');
+  } else if (command === 'catalog') {
+    reply = 'Каталог и актуальные цены — в мини-приложении. Откройте его кнопкой ниже.';
+  } else if (command === 'orders') {
+    reply = 'Ваши заказы — в мини-приложении: «Профиль» → «Заказы». Там же статусы доставки.';
+  } else {
+    reply = [
+      'Помогу с заказом:',
+      `• Написать менеджеру: @${MANAGER_USERNAME}`,
+      '• Открыть магазин — кнопка ниже.',
+      '',
+      'Команды: /start — магазин, /catalog — каталог, /orders — заказы, /help — помощь.'
+    ].join('\n');
+  }
+
+  await sendTelegram(env, managerToken(env), message.chat.id, reply, openStoreKeyboard);
 }
 
 export default {
@@ -292,6 +341,18 @@ export default {
     }
 
     const url = new URL(request.url);
+
+    // Webhook основного бота: приветствие и кнопка магазина.
+    if (url.pathname === '/telegram' && request.method === 'POST') {
+      const secret = request.headers.get('x-telegram-bot-api-secret-token') || '';
+      if (!env.TG_WEBHOOK_SECRET || secret !== env.TG_WEBHOOK_SECRET) {
+        return json({ error: 'forbidden' }, 403);
+      }
+
+      const update = await request.json().catch(() => null);
+      if (update) await handleTelegramUpdate(env, update);
+      return json({ ok: true });
+    }
 
     // Публичный список изменений наличия (что менеджер поменял вручную).
     if (url.pathname === '/stock' && request.method === 'GET') {
@@ -356,7 +417,7 @@ export default {
         env,
         env.BOT_TOKEN_MAIN || env.BOT_TOKEN,
         user.id,
-        '✅ Подписка оформлена. Напишем, когда товар снова появится в наличии.'
+        '🔔 Хорошо! Напишем, как только товар снова появится в наличии.'
       );
 
       return json({ ok: true, canNotify });

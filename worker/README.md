@@ -25,14 +25,39 @@
 - Worker: `pf-store-orders`
 - Адрес: <https://pf-store-orders.vegnette.workers.dev>
 - KV-хранилище `ORDERS_KV`: `3ed4e74283f24d14bd41fc81fde40fba`
-- Менеджер: Telegram ID `5352101935`, бот `@pfadmin_bot`
-- Основной бот для покупателей: `@PF_Store22_bot` (токен добавляется секретом `BOT_TOKEN_MAIN`)
-- Секреты `BOT_TOKEN`, `MANAGER_CHAT_ID` и `REPORT_KEY` заданы в Cloudflare, в репозитории их нет.
+- Менеджер: Telegram ID `5352101935`, username `PF_Store_manager`
+- Основной бот магазина: `@PF_Store22_bot` — он же бот для покупателей и для менеджера.
+  Токен хранится секретом `BOT_TOKEN_MAIN`. Второй бот (`@pfadmin_bot`) больше не нужен.
+- Секреты `BOT_TOKEN`, `BOT_TOKEN_MAIN`, `MANAGER_CHAT_ID`, `REPORT_KEY` и
+  `TG_WEBHOOK_SECRET` заданы в Cloudflare, в репозитории их нет.
 - В `script.js` прописан `ORDERS_ENDPOINT` на этот адрес.
 - Cron `0 14 * * *` (21:00 по Барнаулу) присылает ежедневный отчёт.
+- Уведомления менеджеру (новый заказ, отчёт, поступление товара) идут от
+  `@PF_Store22_bot`.
 
 Проверка: `curl https://pf-store-orders.vegnette.workers.dev/` должен вернуть
 `401 {"error":"invalid_init_data"}` — значит, Worker жив и требует подпись Telegram.
+
+## Бот и webhook
+
+Webhook: `POST /telegram`, адрес `https://pf-store-orders.vegnette.workers.dev/telegram`.
+Telegram присылает его только с заголовком `x-telegram-bot-api-secret-token`,
+значение которого совпадает с секретом `TG_WEBHOOK_SECRET`.
+
+Команды бота:
+
+- `/start` — приветствие и кнопка «Открыть магазин»;
+- `/catalog` — где смотреть актуальные цены;
+- `/orders` — где посмотреть свои заказы и статусы;
+- `/help` — помощь и контакт менеджера.
+
+У бота также заданы описание, короткое описание и кнопка меню типа `web_app`
+на `https://vegnette.github.io/pf-store/`.
+
+Подпись `initData` проверяется токеном любого из двух ботов
+(`BOT_TOKEN_MAIN` или `BOT_TOKEN`), поэтому мини-приложение работает и из
+основного бота, и из старого админ-бота.
+
 
 ## Наличие и подписки
 
@@ -90,7 +115,10 @@ wrangler kv namespace create ORDERS_KV
 
 ```bash
 wrangler secret put BOT_TOKEN
+wrangler secret put BOT_TOKEN_MAIN   # токен основного бота @PF_Store22_bot
 wrangler secret put MANAGER_CHAT_ID   # необязательно
+wrangler secret put REPORT_KEY        # ручной запуск отчёта
+wrangler secret put TG_WEBHOOK_SECRET # защита webhook
 wrangler deploy
 ```
 
