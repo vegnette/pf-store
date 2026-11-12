@@ -37,6 +37,13 @@ const CATEGORY_LABELS = {
 const NO_PHOTO = './images/no-photo.svg';
 const SORT_MODES = ['popular', 'price-asc', 'price-desc', 'discount', 'new'];
 
+// Напоминание о незавершённом заказе
+const CART_SNAPSHOT_KEY = 'pf_cart_snapshot';
+const CART_NUDGE_KEY = 'pf_cart_nudge_dismissed';
+const RESUME_MIN_AGE = 30 * 60 * 1000;
+const RESUME_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
+const RESUME_SNOOZE = 3 * 24 * 60 * 60 * 1000;
+
 // --- СОСТОЯНИЕ ---
 let tg = window.Telegram?.WebApp || null;
 let products = [];
@@ -729,13 +736,20 @@ function openTelegramLink(url) {
   window.open(url, '_blank', 'noopener');
 }
 
-function openManagerChat(product) {
-  if (!product) return;
+function openManagerChat(product, query = '') {
+  let text;
 
-  const stock = Number(product.stock) || 0;
-  const text = stock > 0
-    ? `Здравствуйте! Хочу уточнить по товару: ${product.title} — ${formatPrice(product.price)}`
-    : `Здравствуйте! Хочу уточнить сроки поставки: ${product.title} — ${formatPrice(product.price)}`;
+  if (product) {
+    const stock = Number(product.stock) || 0;
+    text = stock > 0
+      ? `Здравствуйте! Хочу уточнить по товару: ${product.title} — ${formatPrice(product.price)}`
+      : `Здравствуйте! Хочу уточнить сроки поставки: ${product.title} — ${formatPrice(product.price)}`;
+  } else {
+    const search = String(query || '').trim();
+    text = search
+      ? `Здравствуйте! Искал(а) в каталоге «${search}», но ничего не нашлось. Подскажите, есть ли такой товар?`
+      : 'Здравствуйте! Подскажите, пожалуйста, что есть в наличии.';
+  }
 
   openTelegramLink(`https://t.me/${TELEGRAM_USERNAME}?text=${encodeURIComponent(text)}`);
   playSound('tap');
@@ -861,6 +875,82 @@ function shareProduct(product) {
   copyText(url)
     .then(() => showToast('Ссылка на товар скопирована', 'success'))
     .catch(() => showToast('Не удалось скопировать ссылку', 'error'));
+}
+
+// ============================================================
+// НАПОМИНАНИЕ О НЕЗАВЕРШЁННОМ ЗАКАЗЕ
+// ============================================================
+
+function saveCartSnapshot() {
+  if (!cart.length) return;
+  try {
+    localStorage.setItem(CART_SNAPSHOT_KEY, JSON.stringify({
+      ids: cart.map(item => Number(item.id)),
+      at: Date.now()
+    }));
+  } catch (error) {
+    // память браузера может быть недоступна
+  }
+}
+
+function clearCartSnapshot() {
+  try {
+    localStorage.removeItem(CART_SNAPSHOT_KEY);
+  } catch (error) {
+    // ничего страшного
+  }
+}
+
+function readCartSnapshot() {
+  try {
+    const data = JSON.parse(localStorage.getItem(CART_SNAPSHOT_KEY) || 'null');
+    if (!data || !Array.isArray(data.ids) || !data.ids.length) return null;
+    return { ids: data.ids.map(Number), at: Number(data.at) || 0 };
+  } catch (error) {
+    return null;
+  }
+}
+
+function renderResumeBanner() {
+  const banner = document.getElementById('resumeBanner');
+  if (!banner) return;
+
+  const snapshot = readCartSnapshot();
+  if (!snapshot || !cart.length) {
+    banner.hidden = true;
+    return;
+  }
+
+  const age = Date.now() - snapshot.at;
+  if (age < RESUME_MIN_AGE || age > RESUME_MAX_AGE) {
+    banner.hidden = true;
+    return;
+  }
+
+  let dismissedAt = 0;
+  try {
+    dismissedAt = Number(localStorage.getItem(CART_NUDGE_KEY)) || 0;
+  } catch (error) {
+    dismissedAt = 0;
+  }
+  if (dismissedAt && Date.now() - dismissedAt < RESUME_SNOOZE) {
+    banner.hidden = true;
+    return;
+  }
+
+  const first = cart.find(item => snapshot.ids.includes(Number(item.id))) || cart[0];
+  const title = document.getElementById('resumeBannerTitle');
+  const sub = document.getElementById('resumeBannerSub');
+
+  if (title) title.textContent = `Вы остановились на ${first.title}`;
+  if (sub) {
+    const stock = Number(first.stock) || 0;
+    sub.textContent = stock > 0 && stock <= 3
+      ? `Осталось ${stock} шт. — заказ можно оформить в любое время`
+      : 'Заказ можно оформить за пару секунд — в любое время';
+  }
+
+  banner.hidden = false;
 }
 
 function safeLoadCart() {
@@ -2040,6 +2130,7 @@ function markOrderSent(orderId) {
 
   if (!cart.length) hasShownQtyDiscountToast = false;
   saveCart();
+  clearCartSnapshot();
   updateUI();
   renderOrders();
   updateOrderBadge();
@@ -2313,6 +2404,7 @@ async function loadProducts() {
 
     renderCatalog();
     renderRecent();
+    renderResumeBanner();
     updateCategoryVisibility();
     updateUI();
     updateFavoriteUI();
@@ -2358,43 +2450,46 @@ function updateCategoryVisibility() {
 function updateStoreStatus() {
   const chip = document.getElementById('storeStatusChip');
   const text = document.getElementById('storeStatusText');
+  const sub = document.getElementById('storeStatusSub');
+  const open = isStoreOpen();
+
   if (chip && text) {
     const minutes = getStoreMinutes();
-    const isOpen = minutes >= STORE_OPEN_HOUR * 60 && minutes < STORE_CLOSE_HOUR * 60;
     const timeLeft = STORE_CLOSE_HOUR * 60 - minutes;
 
-    if (isOpen) {
-      chip.classList.remove('closed');
+    chip.classList.toggle('closed', !open);
+
+    if (open) {
       text.textContent = timeLeft <= 60
         ? `ОТКРЫТО ЕЩЁ ${timeLeft} МИН · БАРНАУЛ`
         : `ОТКРЫТО ДО ${STORE_CLOSE_HOUR}:00 · БАРНАУЛ`;
+      if (sub) sub.textContent = 'Заказать можно в любое время';
     } else {
-      chip.classList.add('closed');
-      text.textContent = `ЗАКРЫТО · ОТКРОЕМСЯ В ${STORE_OPEN_HOUR}:00 · БАРНАУЛ`;
+      text.textContent = `ЗАКРЫТО · ПРИМЕМ ЗАКАЗ В ${STORE_OPEN_HOUR}:00`;
+      if (sub) sub.textContent = 'Оформить можно сейчас — примем в работу в 10:00';
     }
   }
 
   const todayText = document.getElementById('pickupTodayText');
   if (todayText) {
-    todayText.textContent = isStoreOpen() ? 'Самовывоз сегодня' : `Самовывоз с ${STORE_OPEN_HOUR}:00`;
+    todayText.textContent = open ? 'Самовывоз сегодня' : `Самовывоз с ${STORE_OPEN_HOUR}:00`;
   }
 
   const nowEl = document.getElementById('pickupNow');
   if (nowEl) {
     const time = formatStoreTime();
-    nowEl.textContent = isStoreOpen()
+    nowEl.textContent = open
       ? `Сейчас в Барнауле ${time} · открыто до ${STORE_CLOSE_HOUR}:00`
       : `Сейчас в Барнауле ${time} · откроемся в ${STORE_OPEN_HOUR}:00`;
-    nowEl.classList.toggle('closed', !isStoreOpen());
+    nowEl.classList.toggle('closed', !open);
   }
 
   const closedHint = document.getElementById('checkoutClosedHint');
   if (closedHint) {
-    const open = isStoreOpen();
-    closedHint.hidden = open;
-    if (!open) {
-      closedHint.textContent = `Сейчас магазин закрыт (${formatStoreTime()} по Барнаулу). Заказ можно оставить — ответим после ${STORE_OPEN_HOUR}:00.`;
-    }
+    closedHint.classList.toggle('is-open', open);
+    closedHint.textContent = open
+      ? 'Магазин открыт — ответим в течение дня. Заказать можно в любое время.'
+      : `Сейчас закрыто (${formatStoreTime()} по Барнаулу). Заказ можно оформить в любое время — менеджер примет его в работу после ${STORE_OPEN_HOUR}:00.`;
   }
 }
 
@@ -2572,18 +2667,47 @@ function renderCatalog() {
   const filtered = getFilteredProducts();
 
   if (!filtered.length) {
-    catalog.innerHTML = `
-      <div class="catalog-empty">
-        <div class="catalog-empty-icon" aria-hidden="true">🔎</div>
-        <div class="catalog-empty-title">Ничего не найдено</div>
-        <p>Попробуйте изменить запрос или сбросить фильтры.</p>
-        <button class="empty-reset" onclick="resetAllFilters()">СБРОСИТЬ ФИЛЬТРЫ</button>
-      </div>`;
+    catalog.innerHTML = buildEmptyCatalogHtml();
     return;
   }
 
   catalog.innerHTML = filtered.map(product => buildProductCard(product)).join('');
   animateCatalogCards();
+}
+
+// Пустой результат — не тупик: менеджер, сброс и ближайшие товары
+function buildEmptyCatalogHtml() {
+  const query = searchQuery.trim();
+  const suggestions = products.filter(product => Number(product.stock) > 0).slice(0, 4);
+
+  const chips = Object.entries(CATEGORY_LABELS)
+    .filter(([key]) => products.some(product => product.category === key))
+    .map(([key, label]) => `<button type="button" class="empty-chip" data-empty-cat="${key}">${escapeHtml(label)}</button>`)
+    .join('');
+
+  const suggest = suggestions.map(product => {
+    const image = getProductImages(product)[0] || NO_PHOTO;
+    return `<button type="button" class="empty-suggest-item" data-empty-product="${product.id}">
+      <img src="${image}" alt="" loading="lazy" decoding="async" onerror="this.onerror=null;this.src='${NO_PHOTO}'">
+      <span class="empty-suggest-name">${escapeHtml(product.title)}</span>
+      <span class="empty-suggest-price">${formatPrice(product.price)}</span>
+    </button>`;
+  }).join('');
+
+  return `
+    <div class="catalog-empty">
+      <div class="catalog-empty-icon" aria-hidden="true">🔎</div>
+      <div class="catalog-empty-title">${query ? `По запросу «${escapeHtml(query)}» пусто` : 'Ничего не найдено'}</div>
+      <p>${query
+        ? 'Возможно, товар называется иначе. Напишите менеджеру — подскажем наличие и привезём под заказ.'
+        : 'Попробуйте изменить запрос или сбросить фильтры.'}</p>
+      <div class="empty-actions">
+        <button type="button" class="empty-manager" data-empty-manager="1">НАПИСАТЬ МЕНЕДЖЕРУ</button>
+        <button type="button" class="empty-reset" onclick="resetAllFilters()">СБРОСИТЬ ФИЛЬТРЫ</button>
+      </div>
+      ${chips ? `<div class="empty-chips">${chips}</div>` : ''}
+      ${suggest ? `<div class="empty-suggest-title">Может подойти</div><div class="empty-suggest-list">${suggest}</div>` : ''}
+    </div>`;
 }
 
 function animateCatalogCards() {
@@ -3349,6 +3473,7 @@ function openCheckout() {
   renderCheckoutSummary();
   prefillCheckoutForm();
   updateStoreStatus();
+  saveCartSnapshot();
 
   closeModal('cartModal');
   openModal('checkoutModal');
@@ -3817,6 +3942,7 @@ function setView(view) {
 
   if (view === 'about') loadReviews();
   if (view === 'favorites') renderFavorites();
+  if (view === 'home') renderResumeBanner();
   if (view === 'home' && productsLoaded) renderCatalog();
   renderRecent();
 
@@ -4008,6 +4134,23 @@ function bindEvents() {
   document.getElementById('confirmCancel')?.addEventListener('click', closeConfirm);
   document.getElementById('confirmOk')?.addEventListener('click', runConfirm);
 
+  // Напоминание о незавершённом заказе
+  document.getElementById('resumeBannerBtn')?.addEventListener('click', () => {
+    playSound('tap');
+    triggerHaptic('selection');
+    openCheckout();
+  });
+  document.getElementById('resumeBannerClose')?.addEventListener('click', () => {
+    try {
+      localStorage.setItem(CART_NUDGE_KEY, String(Date.now()));
+    } catch (error) {
+      // скроем только на этот раз
+    }
+    const banner = document.getElementById('resumeBanner');
+    if (banner) banner.hidden = true;
+    playSound('tap');
+  });
+
   // Промокод
   document.getElementById('applyPromoBtn')?.addEventListener('click', applyPromo);
   document.getElementById('promoInput')?.addEventListener('keydown', event => {
@@ -4156,6 +4299,24 @@ function bindEvents() {
 
   // Карточки каталога и избранного (делегирование)
   const handleProductGridClick = event => {
+    const emptyManager = event.target.closest('[data-empty-manager]');
+    if (emptyManager) {
+      openManagerChat(null, searchQuery);
+      return;
+    }
+
+    const emptyCategory = event.target.closest('[data-empty-cat]');
+    if (emptyCategory) {
+      selectCategory(emptyCategory.dataset.emptyCat);
+      return;
+    }
+
+    const emptyProduct = event.target.closest('[data-empty-product]');
+    if (emptyProduct) {
+      openProduct(Number(emptyProduct.dataset.emptyProduct));
+      return;
+    }
+
     const favButton = event.target.closest('.card-fav');
     if (favButton) {
       toggleFavorite(Number(favButton.dataset.fav));
@@ -4219,7 +4380,27 @@ function bindEvents() {
 
   updateScrollProgress();
   updateStoreStatus();
-  setInterval(updateStoreStatus, 60000);
+
+  // Пересчёт статуса раз в минуту и только на видимой вкладке
+  let statusTimer = null;
+  const startStatusTimer = () => {
+    if (statusTimer) return;
+    statusTimer = setInterval(updateStoreStatus, 60000);
+  };
+  const stopStatusTimer = () => {
+    if (!statusTimer) return;
+    clearInterval(statusTimer);
+    statusTimer = null;
+  };
+  startStatusTimer();
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      stopStatusTimer();
+      return;
+    }
+    updateStoreStatus();
+    startStatusTimer();
+  });
 
   // Свайп вниз для закрытия карточки товара
   const productModalContent = document.querySelector('.product-modal');
@@ -4390,6 +4571,7 @@ document.addEventListener('DOMContentLoaded', () => {
   updateUI();
   resetProductSeo();
   renderRecent();
+  renderResumeBanner();
   document.querySelectorAll('.modal').forEach(modal => {
     if (!modal.classList.contains('active')) modal.setAttribute('aria-hidden', 'true');
   });

@@ -11,16 +11,18 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="PF Store">
-  <meta property="og:title" id="ogTitle" content="PF Store">
-  <meta property="og:description" id="ogDescription" content="Электроника с проверкой перед покупкой. Гарантия 14 дней, подарки к заказу.">
-  <meta property="og:image" id="ogImage" content="./images/banner.jpg">
+  <meta property="og:title" id="ogTitle" content="PF Store — электроника с проверкой перед покупкой">
+  <meta property="og:description" id="ogDescription" content="Гарантия 14 дней, проверка при получении, доставка по всей России. Заказ через Telegram — оставить можно в любое время.">
+  <meta property="og:image" id="ogImage" content="https://vegnette.github.io/pf-store/images/banner.jpg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="PF Store">
   <meta property="og:url" id="ogUrl" content="https://vegnette.github.io/pf-store/">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" id="twitterTitle" content="PF Store">
-  <meta name="twitter:description" id="twitterDescription" content="Электроника с проверкой перед покупкой. Гарантия 14 дней, подарки к заказу.">
-  <meta name="twitter:image" id="twitterImage" content="./images/banner.jpg">
+  <meta name="twitter:title" id="twitterTitle" content="PF Store — электроника с проверкой перед покупкой">
+  <meta name="twitter:description" id="twitterDescription" content="Гарантия 14 дней, проверка при получении, доставка по всей России. Заказ через Telegram — оставить можно в любое время.">
+  <meta name="twitter:image" id="twitterImage" content="https://vegnette.github.io/pf-store/images/banner.jpg">
   <title id="pageTitle">PF Store — электроника с проверкой перед покупкой</title>
   <script type="application/ld+json">
   {
@@ -97,14 +99,60 @@
   </header>
 
   <div id="view-home">
-    <div class="trust-strip" aria-label="Преимущества магазина">
-      <span class="trust-chip trust-chip--status" id="storeStatusChip">
-        <span class="status-dot" id="storeStatusDot" aria-hidden="true"></span>
-        <span id="storeStatusText">ПРОВЕРЯЕМ ГРАФИК</span>
+    <div class="resume-banner" id="resumeBanner" hidden role="status">
+      <div class="resume-banner-text">
+        <strong id="resumeBannerTitle">Вы остановились на товаре</strong>
+        <span id="resumeBannerSub">Заказ можно оформить за пару секунд</span>
+      </div>
+      <button type="button" class="resume-banner-btn" id="resumeBannerBtn">ВЕРНУТЬСЯ</button>
+      <button type="button" class="resume-banner-close" id="resumeBannerClose" aria-label="Скрыть напоминание">✕</button>
+    </div>
+
+    <div class="store-status" id="storeStatusChip">
+      <span class="status-dot" id="storeStatusDot" aria-hidden="true"></span>
+      <span class="store-status-body">
+        <span class="store-status-title" id="storeStatusText">ПРОВЕРЯЕМ ГРАФИК</span>
+        <span class="store-status-sub" id="storeStatusSub">Заказать можно в любое время</span>
       </span>
-      <span class="trust-chip"><span class="trust-check" aria-hidden="true">✓</span> Гарантия 14 дней</span>
-      <span class="trust-chip"><span class="trust-check" aria-hidden="true">✓</span> Проверка при получении</span>
-      <span class="trust-chip"><span class="trust-check" aria-hidden="true">✓</span> <span id="pickupTodayText">Самовывоз сегодня</span></span>
+    </div>
+
+    <div class="trust-strip" aria-label="Гарантии магазина">
+      <div class="trust-card">
+        <span class="trust-card-icon" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+        </span>
+        <span class="trust-card-body">
+          <span class="trust-card-title">Проверка при получении</span>
+          <span class="trust-card-sub">Смотрите товар до оплаты</span>
+        </span>
+      </div>
+      <div class="trust-card">
+        <span class="trust-card-icon" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+        </span>
+        <span class="trust-card-body">
+          <span class="trust-card-title">Гарантия 14 дней</span>
+          <span class="trust-card-sub">Обмен или возврат</span>
+        </span>
+      </div>
+      <div class="trust-card">
+        <span class="trust-card-icon" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="4" width="14" height="12"></rect><polygon points="15 8 19 8 22 11 22 16 15 16 15 8"></polygon><circle cx="5.5" cy="18.5" r="1.8"></circle><circle cx="18" cy="18.5" r="1.8"></circle></svg>
+        </span>
+        <span class="trust-card-body">
+          <span class="trust-card-title">Доставка по РФ</span>
+          <span class="trust-card-sub">СДЭК, Почта, Boxberry</span>
+        </span>
+      </div>
+      <div class="trust-card">
+        <span class="trust-card-icon" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 12-9 12s-9-5-9-12a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="2.6"></circle></svg>
+        </span>
+        <span class="trust-card-body">
+          <span class="trust-card-title" id="pickupTodayText">Самовывоз сегодня</span>
+          <span class="trust-card-sub">Барнаул, Павловский тракт, 307к3</span>
+        </span>
+      </div>
     </div>
 
     <div class="slider-container">
@@ -660,7 +708,7 @@
           <textarea id="checkoutComment" name="comment" rows="2" maxlength="300" placeholder="Удобное время, пожелания к заказу"></textarea>
         </label>
 
-        <p class="checkout-closed-hint" id="checkoutClosedHint" hidden></p>
+        <p class="checkout-closed-hint" id="checkoutClosedHint">Заказать можно в любое время — менеджер примет заказ в работу с 10:00.</p>
         <p class="checkout-error" id="checkoutError" role="alert" hidden></p>
 
         <button class="checkout-submit" type="submit">ПЕРЕЙТИ В TELEGRAM</button>
