@@ -1637,7 +1637,6 @@ function createOrderRecord(totals, items, customer = null) {
       address: String(customer.address || '').trim(),
       comment: String(customer.comment || '').trim()
     } : null,
-    consentAt: customer?.consentAt || null,
     user: currentUser ? {
       id: currentUser.id ?? null,
       username: currentUser.username || '',
@@ -3300,10 +3299,6 @@ function clearCheckoutError() {
     error.hidden = true;
     error.textContent = '';
   }
-
-  const consentError = document.getElementById('checkoutConsentError');
-  if (consentError) consentError.hidden = true;
-  document.getElementById('checkoutConsent')?.closest('.checkout-consent')?.classList.remove('invalid');
 }
 
 function showCheckoutError(message, field) {
@@ -3400,28 +3395,9 @@ function submitCheckout(event) {
     return;
   }
 
-  const consentEl = document.getElementById('checkoutConsent');
-  if (!consentEl?.checked) {
-    clearCheckoutError();
-    const consentError = document.getElementById('checkoutConsentError');
-    if (consentError) consentError.hidden = false;
-    consentEl?.closest('.checkout-consent')?.classList.add('invalid');
-    consentEl?.focus();
-    triggerHaptic('error');
-    playSound('error');
-    return;
-  }
-
   clearCheckoutError();
 
-  const consentAt = new Date().toISOString();
-  try {
-    localStorage.setItem('pf_consent', JSON.stringify({ version: 1, at: consentAt }));
-  } catch (error) {
-    // согласие всё равно фиксируем в заказе
-  }
-
-  const customer = { name, phone, delivery: method, address, comment, consentAt };
+  const customer = { name, phone, delivery: method, address, comment };
 
   try {
     localStorage.setItem('pf_customer', JSON.stringify({
@@ -3514,22 +3490,6 @@ function checkout(customer = null) {
 // ============================================================
 // ИНФО-МОДАЛКА
 // ============================================================
-
-function openLegalDoc(kind) {
-  const source = document.querySelector(kind === 'terms' ? '#view-terms .legal-page' : '#view-privacy .legal-page');
-  const modal = document.getElementById('legalModal');
-  const body = document.getElementById('legalModalBody');
-  const title = document.getElementById('legalModalTitle');
-  if (!source || !modal || !body) return;
-
-  body.innerHTML = source.innerHTML;
-  body.querySelector('.legal-back')?.remove();
-  if (title) title.textContent = source.querySelector('.legal-title')?.textContent || 'Документы';
-
-  openModal(modal);
-  playSound('tap');
-  triggerHaptic('selection');
-}
 
 function openInfoModal(type) {
   const modal = document.getElementById('infoModal');
@@ -3810,7 +3770,7 @@ async function promptInstall() {
 // ============================================================
 
 function setView(view) {
-  if (!['home', 'about', 'profile', 'favorites', 'privacy', 'terms'].includes(view)) return;
+  if (!['home', 'about', 'profile', 'favorites'].includes(view)) return;
 
   currentView = view;
   playSound('tap');
@@ -3820,8 +3780,6 @@ function setView(view) {
   const viewProfile = document.getElementById('view-profile');
   const viewAbout = document.getElementById('view-about');
   const viewFavorites = document.getElementById('view-favorites');
-  const viewPrivacy = document.getElementById('view-privacy');
-  const viewTerms = document.getElementById('view-terms');
   const searchWrap = document.getElementById('searchWrapper');
   const slider = document.querySelector('.slider-container');
   const categories = document.getElementById('categories');
@@ -3832,9 +3790,7 @@ function setView(view) {
     home: viewHome,
     about: viewAbout,
     profile: viewProfile,
-    favorites: viewFavorites,
-    privacy: viewPrivacy,
-    terms: viewTerms
+    favorites: viewFavorites
   };
   Object.entries(views).forEach(([name, el]) => {
     if (el) el.style.display = name === view ? 'block' : 'none';
@@ -3849,9 +3805,7 @@ function setView(view) {
     home: 'navHome',
     about: 'navAboutTab',
     profile: 'navProfileTab',
-    favorites: 'navFavoritesTab',
-    privacy: 'navAboutTab',
-    terms: 'navAboutTab'
+    favorites: 'navFavoritesTab'
   };
 
   ['navHome', 'navCartTab', 'navAboutTab', 'navProfileTab', 'navFavoritesTab'].forEach(id => {
@@ -4090,25 +4044,6 @@ function bindEvents() {
     document.getElementById('searchWrapper')?.classList.remove('has-value');
     renderCatalog();
     searchInput?.focus();
-  });
-
-  // Правовые документы
-  document.addEventListener('click', event => {
-    const link = event.target.closest('[data-legal]');
-    if (!link) return;
-    event.preventDefault();
-    openLegalDoc(link.dataset.legal === 'terms' ? 'terms' : 'privacy');
-  });
-  document.getElementById('closeLegal')?.addEventListener('click', () => closeModal('legalModal'));
-  document.getElementById('privacyBack')?.addEventListener('click', () => setView('about'));
-  document.getElementById('termsBack')?.addEventListener('click', () => setView('about'));
-
-  // Согласие на обработку персональных данных
-  const consent = document.getElementById('checkoutConsent');
-  consent?.addEventListener('change', () => {
-    const error = document.getElementById('checkoutConsentError');
-    if (error) error.hidden = true;
-    consent.closest('.checkout-consent')?.classList.remove('invalid');
   });
 
   // Закрытие модалок
@@ -4404,7 +4339,7 @@ function initSectionReveal() {
   if (prefersReducedMotion() || !('IntersectionObserver' in window)) return;
 
   const targets = document.querySelectorAll(
-    '.trust-strip, .slider-container, .about-section, .about-cta, .about-legal-links'
+    '.trust-strip, .slider-container, .about-section, .about-cta'
   );
   if (!targets.length) return;
 
