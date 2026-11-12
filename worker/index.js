@@ -305,10 +305,18 @@ async function handleTelegramUpdate(env, update) {
     : '';
 
   const openStoreKeyboard = {
-    inline_keyboard: [[{ text: '🛍 Открыть магазин', web_app: { url: STORE_URL } }]]
+    inline_keyboard: [
+      [{ text: '🛍 Открыть магазин', web_app: { url: STORE_URL } }],
+      [{ text: '📦 Мои заказы', web_app: { url: `${STORE_URL}?view=orders` } }]
+    ]
+  };
+
+  const ordersKeyboard = {
+    inline_keyboard: [[{ text: '📦 Мои заказы', web_app: { url: `${STORE_URL}?view=orders` } }]]
   };
 
   let reply;
+  let keyboard = openStoreKeyboard;
 
   if (command === 'start') {
     reply = [
@@ -320,7 +328,8 @@ async function handleTelegramUpdate(env, update) {
   } else if (command === 'catalog') {
     reply = 'Каталог и актуальные цены — в мини-приложении. Откройте его кнопкой ниже.';
   } else if (command === 'orders') {
-    reply = 'Ваши заказы — в мини-приложении: «Профиль» → «Заказы». Там же статусы доставки.';
+    reply = 'Ваши заказы и статусы доставки — в мини-приложении. Откройте кнопкой ниже.';
+    keyboard = ordersKeyboard;
   } else {
     reply = [
       'Помогу с заказом:',
@@ -331,7 +340,7 @@ async function handleTelegramUpdate(env, update) {
     ].join('\n');
   }
 
-  await sendTelegram(env, managerToken(env), message.chat.id, reply, openStoreKeyboard);
+  await sendTelegram(env, managerToken(env), message.chat.id, reply, keyboard);
 }
 
 export default {

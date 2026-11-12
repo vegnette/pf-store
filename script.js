@@ -4205,9 +4205,14 @@ document.addEventListener('DOMContentLoaded', () => {
   loadOrdersFromServer();
 
   try {
-    const shortcutView = new URLSearchParams(location.search).get('view');
-    if (shortcutView === 'cart' && !new URLSearchParams(location.search).get('product')) {
+    const params = new URLSearchParams(location.search);
+    const shortcutView = params.get('view');
+    const hasProduct = Boolean(params.get('product'));
+
+    if (!hasProduct && shortcutView === 'cart') {
       setTimeout(openCart, 500);
+    } else if (!hasProduct && shortcutView === 'orders') {
+      setTimeout(openOrders, 500);
     }
   } catch (error) {
     // некорректная ссылка не должна мешать загрузке
