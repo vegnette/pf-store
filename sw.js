@@ -1,5 +1,5 @@
 /* PF Store service worker: офлайн-оболочка + свежие файлы при сети */
-const CACHE_NAME = 'pf-store-v6';
+const CACHE_NAME = 'pf-store-v7';
 
 const PRECACHE = [
   './',
