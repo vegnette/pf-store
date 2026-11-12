@@ -1556,11 +1556,29 @@ function initTelegram() {
 // ============================================================
 
 const ORDER_STATUS_LABELS = {
-  awaiting: 'НЕ ОТПРАВЛЕН',
-  sent: 'ОТПРАВЛЕН',
-  delivered: 'ДОСТАВЛЕН',
+  created: 'СОЗДАН',
+  manager: 'У МЕНЕДЖЕРА',
+  delivery: 'В ДОСТАВКЕ',
+  received: 'ПОЛУЧЕН',
   canceled: 'ОТМЕНЁН'
 };
+
+// Старые статусы (до 4 этапов) продолжают приходить из истории и из KV.
+const ORDER_STATUS_MIGRATION = {
+  awaiting: 'created',
+  sent: 'manager',
+  delivered: 'received'
+};
+
+function normalizeOrderStatus(status) {
+  const normalized = ORDER_STATUS_MIGRATION[status] || status;
+  return ORDER_STATUS_LABELS[normalized] ? normalized : 'created';
+}
+
+function isTestOrder(order) {
+  return Boolean(order) && (order.test === true || /^test/i.test(String(order.id || '')));
+}
+
 
 function safeLoadOrders() {
   try {
@@ -1570,7 +1588,7 @@ function safeLoadOrders() {
       .filter(order => order && order.id && Array.isArray(order.items))
       .map(order => ({
         ...order,
-        status: ORDER_STATUS_LABELS[order.status] ? order.status : 'awaiting'
+        status: normalizeOrderStatus(order.status)
       }));
   } catch (error) {
     return [];
@@ -1595,7 +1613,7 @@ function createOrderRecord(totals, items, customer = null) {
     id: `PF-${now.getTime().toString(36).toUpperCase().slice(-5)}`,
     createdAt: now.toISOString(),
     updatedAt: now.toISOString(),
-    status: 'awaiting',
+    status: 'created',
     items: items.map(item => ({
       id: Number(item.id),
       title: String(item.title || ''),
@@ -1619,6 +1637,7 @@ function createOrderRecord(totals, items, customer = null) {
       address: String(customer.address || '').trim(),
       comment: String(customer.comment || '').trim()
     } : null,
+    consentAt: customer?.consentAt || null,
     user: currentUser ? {
       id: currentUser.id ?? null,
       username: currentUser.username || '',
@@ -1749,6 +1768,7 @@ async function loadOrdersFromServer() {
     const byId = new Map(orders.map(order => [order.id, order]));
     remote.forEach(order => {
       if (!order?.id || !Array.isArray(order.items)) return;
+      order.status = normalizeOrderStatus(order.status);
       const local = byId.get(order.id);
       const remoteTime = new Date(order.updatedAt || order.createdAt || 0).getTime();
       const localTime = new Date(local?.updatedAt || local?.createdAt || 0).getTime();
@@ -1770,14 +1790,16 @@ function updateOrderBadge() {
   const el = document.getElementById('profileOrdersCount');
   if (!el) return;
 
-  if (!orders.length) {
+  const realOrders = orders.filter(order => !isTestOrder(order));
+
+  if (!realOrders.length) {
     el.textContent = 'Пока нет заказов';
     el.classList.remove('warn');
     return;
   }
 
-  const awaiting = orders.filter(order => order.status === 'awaiting').length;
-  const total = orders.length;
+  const awaiting = realOrders.filter(order => normalizeOrderStatus(order.status) === 'created').length;
+  const total = realOrders.length;
   el.textContent = awaiting > 0
     ? `${total} ${plural(total, 'заказ', 'заказа', 'заказов')} · ${awaiting} ждёт подтверждения`
     : `${total} ${plural(total, 'заказ', 'заказа', 'заказов')}`;
@@ -1794,54 +1816,67 @@ function openOrders() {
 
 function renderOrderActions(order) {
   const id = escapeHtml(order.id);
+  const status = normalizeOrderStatus(order.status);
   const actions = [];
   const btn = (action, label, primary = false) => `
     <button type="button" class="order-action-btn${primary ? ' primary' : ''}"
       data-order-action="${action}" data-order-id="${id}">${label}</button>`;
 
-  if (order.status === 'awaiting') {
-    actions.push(btn('sent', 'Я отправил', true));
-    actions.push(btn('resend', 'Открыть Telegram'));
-  } else if (order.status === 'sent') {
+  if (status === 'created') {
+    if (isManager) {
+      actions.push(btn('manager', 'Принять', true));
+    } else {
+      actions.push(btn('sent', 'Я отправил', true));
+      actions.push(btn('resend', 'Открыть Telegram'));
+    }
+  } else if (status === 'manager') {
     actions.push(btn('reorder', 'Повторить заказ'));
     if (isManager) {
-      actions.push(btn('delivered', 'Доставлен', true));
-      actions.push(btn('awaiting', 'Не отправлен'));
+      actions.push(btn('delivery', 'В доставку', true));
     } else {
       actions.push(btn('resend', 'Написать менеджеру'));
     }
-  } else if (order.status === 'delivered') {
+  } else if (status === 'delivery') {
+    actions.push(btn('reorder', 'Повторить заказ'));
+    if (isManager) {
+      actions.push(btn('received', 'Получен', true));
+    } else {
+      actions.push(btn('resend', 'Написать менеджеру'));
+    }
+  } else if (status === 'received') {
     actions.push(btn('reorder', 'Повторить заказ'));
     actions.push(btn('resend', 'Написать менеджеру'));
-  } else if (order.status === 'canceled') {
+  } else if (status === 'canceled') {
     actions.push(btn('reorder', 'Повторить заказ'));
   }
 
-  if (isManager && order.status !== 'canceled') {
+  if (isManager && status !== 'canceled') {
     actions.push(btn('canceled', 'Отменить'));
+  }
+
+  if (isManager && isTestOrder(order)) {
+    actions.push(btn('delete', 'Удалить тестовый'));
   }
 
   return actions.length ? `<div class="order-actions">${actions.join('')}</div>` : '';
 }
 
 function renderOrderTimeline(order) {
-  const status = ORDER_STATUS_LABELS[order.status] ? order.status : 'awaiting';
+  const status = normalizeOrderStatus(order.status);
   if (status === 'canceled') return '';
 
-  const sentDone = status === 'sent' || status === 'delivered';
-  const deliveredDone = status === 'delivered';
-  const steps = [
-    { label: 'Создан', state: 'done' },
-    { label: 'У менеджера', state: sentDone ? 'done' : 'current' },
-    {
-      label: deliveredDone ? 'Доставлен' : 'Доставка',
-      state: deliveredDone ? 'done' : (sentDone ? 'current' : '')
-    }
-  ];
+  const progress = { created: 1, manager: 2, delivery: 3, received: 4 }[status] ?? 1;
+  const currentIndex = progress - 1;
+  const steps = ['Создан', 'У менеджера', 'Доставка', 'Получен'].map((label, index) => {
+    let state = '';
+    if (index < currentIndex) state = 'done';
+    else if (index === currentIndex) state = status === 'received' ? 'done' : 'current';
+    return { label, state };
+  });
 
   return `<div class="order-timeline ${status}" aria-label="Этапы заказа: ${steps.map(step => step.label).join(', ')}">
-    ${steps.map(step => `
-      <div class="order-step ${step.state}">
+    ${steps.map((step, index) => `
+      <div class="order-step ${step.state}" style="--step-index:${index}">
         <span class="order-step-dot" aria-hidden="true"></span>
         <span class="order-step-label">${step.label}</span>
       </div>`).join('')}
@@ -1872,18 +1907,20 @@ function renderOrders() {
   const subtitle = document.getElementById('ordersSubtitle');
   if (subtitle) subtitle.textContent = isManager ? 'Панель менеджера' : 'История заказов';
 
-  const list = [...orders].sort((a, b) => {
-    const aTime = new Date(a.createdAt || 0).getTime();
-    const bTime = new Date(b.createdAt || 0).getTime();
-    return bTime - aTime;
-  });
+  const list = orders
+    .filter(order => isManager || !isTestOrder(order))
+    .sort((a, b) => {
+      const aTime = new Date(a.createdAt || 0).getTime();
+      const bTime = new Date(b.createdAt || 0).getTime();
+      return bTime - aTime;
+    });
 
   const toolbar = `
     <div class="orders-toolbar${isManager ? ' manager' : ''}">
       <span>${isManager
         ? (ORDERS_ENDPOINT
-          ? 'Все заказы магазина · отмечайте отправленные'
-          : 'Заказы на этом устройстве · отмечайте отправленные')
+          ? 'Все заказы магазина · меняйте этапы заказа'
+          : 'Заказы на этом устройстве · меняйте этапы заказа')
         : (ORDERS_ENDPOINT
           ? 'Статусы синхронизируются с менеджером'
           : 'Статус заказа подтверждается вручную')}</span>
@@ -1895,14 +1932,14 @@ function renderOrders() {
       <div class="orders-empty">
         <div class="orders-empty-icon" aria-hidden="true">📦</div>
         <div class="orders-empty-title">Заказов пока нет</div>
-        <p class="orders-empty-text">Оформите заказ — он появится здесь, и вы сможете проверить, отправлен ли он менеджеру.</p>
+        <p class="orders-empty-text">Оформите заказ — он появится здесь, и вы сможете следить за этапами: создан, у менеджера, доставка, получен.</p>
         <button type="button" class="empty-reset" data-order-action="shop">ПЕРЕЙТИ К ПОКУПКАМ</button>
       </div>`;
     return;
   }
 
   body.innerHTML = toolbar + list.map(order => {
-    const status = ORDER_STATUS_LABELS[order.status] ? order.status : 'awaiting';
+    const status = normalizeOrderStatus(order.status);
     const discountLines = [];
 
     if (order.qtyDiscount > 0) {
@@ -1931,6 +1968,7 @@ function renderOrders() {
           </div>
           <span class="order-status ${status}">${ORDER_STATUS_LABELS[status]}</span>
         </div>
+        ${isManager && isTestOrder(order) ? '<div class="order-test-note">Тестовый заказ · не входит в историю и отчёт</div>' : ''}
         ${renderOrderTimeline(order)}
         <div class="order-items">
           ${order.items.map(item => `
@@ -1948,21 +1986,21 @@ function renderOrders() {
   }).join('') + `
     <div class="orders-local-note">${isManager
       ? (ORDERS_ENDPOINT
-        ? 'Заказы синхронизируются с Cloudflare Worker. Статусы видны на всех устройствах.'
+        ? 'Заказы синхронизируются с Cloudflare Worker. История сохраняется полностью: отменённые и полученные заказы остаются в списке.'
         : 'Панель работает на этом устройстве. Для синхронизации между устройствами подключите ORDERS_ENDPOINT — инструкция в папке worker.')
       : (ORDERS_ENDPOINT
-        ? 'История синхронизируется с сервером. Статус «Отправлен» ставит менеджер или вы сами после отправки сообщения.'
-        : 'История хранится на этом устройстве. Статус «Отправлен» появляется только после вашего подтверждения или отметки менеджера.')}</div>`;
+        ? 'История синхронизируется с сервером. Этапы заказа: создан → у менеджера → доставка → получен.'
+        : 'История хранится на этом устройстве. Этапы заказа: создан → у менеджера → доставка → получен.')}</div>`;
 }
 
 function askOrderConfirmation(orderId) {
   const order = orders.find(item => item.id === orderId);
-  if (!order || order.status !== 'awaiting') return;
+  if (!order || normalizeOrderStatus(order.status) !== 'created') return;
   if (document.getElementById('confirmModal')?.classList.contains('active')) return;
 
   openConfirm({
     title: 'Сообщение отправлено?',
-    text: `Заказ ${order.id} пока сохранён как «не отправлен». Нажмите «Я ОТПРАВИЛ» только если сообщение действительно ушло менеджеру. Если нет — заказ останется в профиле, и его можно отправить позже.`,
+    text: `Заказ ${order.id} пока сохранён как «создан». Нажмите «Я ОТПРАВИЛ» только если сообщение действительно ушло менеджеру. Если нет — заказ останется в профиле, и его можно отправить позже.`,
     confirmText: 'Я ОТПРАВИЛ',
     icon: 'send',
     onConfirm: () => markOrderSent(order.id)
@@ -1972,13 +2010,13 @@ function askOrderConfirmation(orderId) {
 function markOrderSent(orderId) {
   const order = orders.find(item => item.id === orderId);
   if (!order) return;
-  if (order.status === 'sent') {
-    showToast('Заказ уже отмечен как отправленный');
+  if (normalizeOrderStatus(order.status) === 'manager') {
+    showToast('Заказ уже у менеджера');
     return;
   }
 
   const now = new Date().toISOString();
-  order.status = 'sent';
+  order.status = 'manager';
   order.confirmedAt = now;
   order.updatedAt = now;
   order.confirmedBy = 'user';
@@ -2023,19 +2061,25 @@ function setOrderStatus(orderId, status) {
     showToast('Доступно только менеджеру', 'error');
     return;
   }
-  if (!ORDER_STATUS_LABELS[status]) return;
+
+  const nextStatus = normalizeOrderStatus(status);
+  if (!ORDER_STATUS_LABELS[nextStatus]) return;
 
   const order = orders.find(item => item.id === orderId);
-  if (!order || order.status === status) return;
+  if (!order || normalizeOrderStatus(order.status) === nextStatus) return;
 
   const now = new Date().toISOString();
-  order.status = status;
+  order.status = nextStatus;
   order.updatedAt = now;
   order.updatedBy = currentUser?.username || currentUser?.first_name || 'manager';
-  if (status === 'sent' && !order.confirmedAt) order.confirmedAt = now;
-  if (status === 'delivered') {
-    if (!order.confirmedAt) order.confirmedAt = now;
+
+  if ((nextStatus === 'manager' || nextStatus === 'delivery' || nextStatus === 'received') && !order.confirmedAt) {
+    order.confirmedAt = now;
+  }
+  if (nextStatus === 'delivery' && !order.shippedAt) order.shippedAt = now;
+  if (nextStatus === 'received') {
     if (!order.deliveredAt) order.deliveredAt = now;
+    if (!order.receivedAt) order.receivedAt = now;
   }
 
   saveOrders();
@@ -2043,9 +2087,47 @@ function setOrderStatus(orderId, status) {
   renderOrders();
   updateOrderBadge();
   renderCartItems();
-  showToast(`Статус: ${ORDER_STATUS_LABELS[status].toLowerCase()}`, 'success');
+  showToast(`Статус: ${ORDER_STATUS_LABELS[nextStatus].toLowerCase()}`, 'success');
   playSound('success');
   triggerHaptic('success');
+}
+
+function deleteTestOrder(orderId) {
+  if (!isManager) return;
+
+  const order = orders.find(item => item.id === orderId);
+  if (!order || !isTestOrder(order)) {
+    showToast('Удалять можно только тестовые заказы', 'error');
+    return;
+  }
+
+  openConfirm({
+    title: 'Удалить тестовый заказ?',
+    text: `Заказ ${order.id} будет удалён навсегда и не попадёт в историю и отчёт.`,
+    confirmText: 'УДАЛИТЬ',
+    icon: 'trash',
+    onConfirm: async () => {
+      orders = orders.filter(item => item.id !== orderId);
+      saveOrders();
+      renderOrders();
+      updateOrderBadge();
+
+      const initData = ensureTelegramApp()?.initData || '';
+      if (ORDERS_ENDPOINT && initData) {
+        try {
+          await fetch(ORDERS_ENDPOINT, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: 'delete', id: orderId, initData })
+          });
+        } catch (error) {
+          // локально уже удалён; сервер можно почистить позже
+        }
+      }
+
+      showToast('Тестовый заказ удалён', 'success');
+    }
+  });
 }
 
 function resendOrder(orderId) {
@@ -2057,7 +2139,7 @@ function resendOrder(orderId) {
   triggerHaptic('selection');
   showToast('Сообщение открыто в Telegram', 'success');
 
-  if (order.status === 'awaiting') {
+  if (normalizeOrderStatus(order.status) === 'created') {
     setTimeout(() => askOrderConfirmation(order.id), 600);
   }
 }
@@ -3129,7 +3211,7 @@ function renderCartItems() {
   if (checkoutBtn) checkoutBtn.disabled = cart.length === 0;
   if (clearCartBtn) clearCartBtn.disabled = cart.length === 0;
 
-  const pendingOrder = orders.find(order => order.status === 'awaiting');
+  const pendingOrder = orders.find(order => !isTestOrder(order) && normalizeOrderStatus(order.status) === 'created');
   const pendingHint = document.getElementById('pendingOrderHint');
   const pendingId = document.getElementById('pendingOrderId');
   if (pendingHint) pendingHint.hidden = !pendingOrder;
@@ -3214,9 +3296,14 @@ function updateCheckoutAddressField() {
 
 function clearCheckoutError() {
   const error = document.getElementById('checkoutError');
-  if (!error) return;
-  error.hidden = true;
-  error.textContent = '';
+  if (error) {
+    error.hidden = true;
+    error.textContent = '';
+  }
+
+  const consentError = document.getElementById('checkoutConsentError');
+  if (consentError) consentError.hidden = true;
+  document.getElementById('checkoutConsent')?.closest('.checkout-consent')?.classList.remove('invalid');
 }
 
 function showCheckoutError(message, field) {
@@ -3313,9 +3400,28 @@ function submitCheckout(event) {
     return;
   }
 
+  const consentEl = document.getElementById('checkoutConsent');
+  if (!consentEl?.checked) {
+    clearCheckoutError();
+    const consentError = document.getElementById('checkoutConsentError');
+    if (consentError) consentError.hidden = false;
+    consentEl?.closest('.checkout-consent')?.classList.add('invalid');
+    consentEl?.focus();
+    triggerHaptic('error');
+    playSound('error');
+    return;
+  }
+
   clearCheckoutError();
 
-  const customer = { name, phone, delivery: method, address, comment };
+  const consentAt = new Date().toISOString();
+  try {
+    localStorage.setItem('pf_consent', JSON.stringify({ version: 1, at: consentAt }));
+  } catch (error) {
+    // согласие всё равно фиксируем в заказе
+  }
+
+  const customer = { name, phone, delivery: method, address, comment, consentAt };
 
   try {
     localStorage.setItem('pf_customer', JSON.stringify({
@@ -3343,16 +3449,16 @@ function checkout(customer = null) {
   const items = cart.map(item => ({ ...item }));
 
   // Если такой же заказ уже ждёт подтверждения — не плодим дубли.
-  let order = orders.find(entry => entry.status === 'awaiting' && orderMatchesCart(entry));
+  let order = orders.find(entry => !isTestOrder(entry) && normalizeOrderStatus(entry.status) === 'created' && orderMatchesCart(entry));
 
   if (!order) {
     // Старые неотправленные черновики помечаем отменёнными, а не удаляем:
     // так история остаётся честной, а промокод не применяется дважды.
-    const superseded = orders.filter(entry => entry.status === 'awaiting');
+    const superseded = orders.filter(entry => !isTestOrder(entry) && normalizeOrderStatus(entry.status) === 'created');
     if (superseded.length) {
       const now = new Date().toISOString();
       orders = orders.map(entry => {
-        if (entry.status !== 'awaiting') return entry;
+        if (isTestOrder(entry) || normalizeOrderStatus(entry.status) !== 'created') return entry;
         return {
           ...entry,
           status: 'canceled',
@@ -3408,6 +3514,22 @@ function checkout(customer = null) {
 // ============================================================
 // ИНФО-МОДАЛКА
 // ============================================================
+
+function openLegalDoc(kind) {
+  const source = document.querySelector(kind === 'terms' ? '#view-terms .legal-page' : '#view-privacy .legal-page');
+  const modal = document.getElementById('legalModal');
+  const body = document.getElementById('legalModalBody');
+  const title = document.getElementById('legalModalTitle');
+  if (!source || !modal || !body) return;
+
+  body.innerHTML = source.innerHTML;
+  body.querySelector('.legal-back')?.remove();
+  if (title) title.textContent = source.querySelector('.legal-title')?.textContent || 'Документы';
+
+  openModal(modal);
+  playSound('tap');
+  triggerHaptic('selection');
+}
 
 function openInfoModal(type) {
   const modal = document.getElementById('infoModal');
@@ -3688,7 +3810,7 @@ async function promptInstall() {
 // ============================================================
 
 function setView(view) {
-  if (!['home', 'about', 'profile', 'favorites'].includes(view)) return;
+  if (!['home', 'about', 'profile', 'favorites', 'privacy', 'terms'].includes(view)) return;
 
   currentView = view;
   playSound('tap');
@@ -3698,6 +3820,8 @@ function setView(view) {
   const viewProfile = document.getElementById('view-profile');
   const viewAbout = document.getElementById('view-about');
   const viewFavorites = document.getElementById('view-favorites');
+  const viewPrivacy = document.getElementById('view-privacy');
+  const viewTerms = document.getElementById('view-terms');
   const searchWrap = document.getElementById('searchWrapper');
   const slider = document.querySelector('.slider-container');
   const categories = document.getElementById('categories');
@@ -3708,7 +3832,9 @@ function setView(view) {
     home: viewHome,
     about: viewAbout,
     profile: viewProfile,
-    favorites: viewFavorites
+    favorites: viewFavorites,
+    privacy: viewPrivacy,
+    terms: viewTerms
   };
   Object.entries(views).forEach(([name, el]) => {
     if (el) el.style.display = name === view ? 'block' : 'none';
@@ -3723,7 +3849,9 @@ function setView(view) {
     home: 'navHome',
     about: 'navAboutTab',
     profile: 'navProfileTab',
-    favorites: 'navFavoritesTab'
+    favorites: 'navFavoritesTab',
+    privacy: 'navAboutTab',
+    terms: 'navAboutTab'
   };
 
   ['navHome', 'navCartTab', 'navAboutTab', 'navProfileTab', 'navFavoritesTab'].forEach(id => {
@@ -3889,7 +4017,11 @@ function bindEvents() {
       reorder(orderId);
       return;
     }
-    if (action === 'awaiting' || action === 'canceled' || action === 'delivered') {
+    if (action === 'delete') {
+      deleteTestOrder(orderId);
+      return;
+    }
+    if (action === 'manager' || action === 'delivery' || action === 'received' || action === 'canceled') {
       setOrderStatus(orderId, action);
     }
   });
@@ -3955,8 +4087,28 @@ function bindEvents() {
     if (searchInput) searchInput.value = '';
     searchQuery = '';
     searchClear.classList.remove('active');
+    document.getElementById('searchWrapper')?.classList.remove('has-value');
     renderCatalog();
     searchInput?.focus();
+  });
+
+  // Правовые документы
+  document.addEventListener('click', event => {
+    const link = event.target.closest('[data-legal]');
+    if (!link) return;
+    event.preventDefault();
+    openLegalDoc(link.dataset.legal === 'terms' ? 'terms' : 'privacy');
+  });
+  document.getElementById('closeLegal')?.addEventListener('click', () => closeModal('legalModal'));
+  document.getElementById('privacyBack')?.addEventListener('click', () => setView('about'));
+  document.getElementById('termsBack')?.addEventListener('click', () => setView('about'));
+
+  // Согласие на обработку персональных данных
+  const consent = document.getElementById('checkoutConsent');
+  consent?.addEventListener('change', () => {
+    const error = document.getElementById('checkoutConsentError');
+    if (error) error.hidden = true;
+    consent.closest('.checkout-consent')?.classList.remove('invalid');
   });
 
   // Закрытие модалок
@@ -4084,7 +4236,8 @@ function bindEvents() {
 
     const addButton = event.target.closest('.card-btn');
     if (addButton) {
-      addToCart(Number(addButton.dataset.add));
+      const added = addToCart(Number(addButton.dataset.add));
+      if (added) pulseAddButton(addButton, addButton.textContent.trim() === 'ПОД ЗАКАЗ');
       return;
     }
 
@@ -4180,6 +4333,107 @@ orders = safeLoadOrders();
 recentIds = safeLoadRecent();
 priceDrops = safeLoadJson('pf_price_drops', {});
 
+// ============================================================
+// ОРГАНИЧНЫЕ АНИМАЦИИ
+// ============================================================
+
+const SEARCH_HINTS = ['ПОИСК', 'НАУШНИКИ', 'СМАРТФОНЫ', 'ЧАСЫ', 'КОЛОНКИ', 'АКСЕССУАРЫ', 'ПРОВОДА'];
+
+function prefersReducedMotion() {
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+// Ротация подсказок поиска — как в Aceternity Placeholders and Vanish Input.
+function initSearchMotion() {
+  const input = document.getElementById('searchInput');
+  const wrapper = document.getElementById('searchWrapper');
+  const rotator = document.getElementById('searchRotator');
+  if (!input || !wrapper || !rotator) return;
+
+  let index = 0;
+  let swapTimer = null;
+
+  const syncValue = () => wrapper.classList.toggle('has-value', input.value.length > 0);
+  syncValue();
+  input.addEventListener('input', syncValue);
+
+  if (prefersReducedMotion()) return;
+
+  const tick = () => {
+    if (document.hidden || input.value || document.activeElement === input) return;
+    rotator.classList.add('is-swapping');
+    swapTimer = window.setTimeout(() => {
+      index = (index + 1) % SEARCH_HINTS.length;
+      rotator.textContent = SEARCH_HINTS[index];
+      rotator.classList.remove('is-swapping');
+    }, 260);
+  };
+
+  const timer = window.setInterval(tick, 3600);
+  window.addEventListener('pagehide', () => {
+    window.clearInterval(timer);
+    window.clearTimeout(swapTimer);
+  }, { once: true });
+}
+
+// Мягкий блик по карточке вслед за курсором — как spotlight в Aceternity.
+function initCardSpotlight() {
+  if (prefersReducedMotion()) return;
+  if (!window.matchMedia('(hover: hover) and (pointer: fine)').matches) return;
+
+  let frame = null;
+  let lastEvent = null;
+
+  document.addEventListener('pointermove', event => {
+    const card = event.target.closest?.('.card');
+    if (!card) return;
+    lastEvent = { card, x: event.clientX, y: event.clientY };
+    if (frame) return;
+    frame = window.requestAnimationFrame(() => {
+      frame = null;
+      if (!lastEvent) return;
+      const rect = lastEvent.card.getBoundingClientRect();
+      lastEvent.card.style.setProperty('--mx', `${lastEvent.x - rect.left}px`);
+      lastEvent.card.style.setProperty('--my', `${lastEvent.y - rect.top}px`);
+    });
+  }, { passive: true });
+}
+
+// Секции проявляются мягко, без «врезания» и без влияния на работу страницы.
+function initSectionReveal() {
+  if (prefersReducedMotion() || !('IntersectionObserver' in window)) return;
+
+  const targets = document.querySelectorAll(
+    '.trust-strip, .slider-container, .about-section, .about-cta, .about-legal-links'
+  );
+  if (!targets.length) return;
+
+  const observer = new IntersectionObserver(entries => {
+    entries.forEach(entry => {
+      if (!entry.isIntersecting) return;
+      entry.target.classList.add('is-visible');
+      observer.unobserve(entry.target);
+    });
+  }, { rootMargin: '0px 0px -6% 0px', threshold: 0.06 });
+
+  targets.forEach(el => {
+    el.classList.add('reveal');
+    observer.observe(el);
+  });
+}
+
+// Кнопка «Добавлено» с коротким подтверждением на месте — состояние, а не вспышка.
+function pulseAddButton(button, isOrder = false) {
+  if (!button) return;
+  const label = button.textContent;
+  button.classList.add('is-added');
+  button.textContent = isOrder ? 'ПОД ЗАКАЗ ✓' : 'ДОБАВЛЕНО ✓';
+  window.setTimeout(() => {
+    button.classList.remove('is-added');
+    button.textContent = label;
+  }, 1500);
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   updateGreeting(null);
   updateSoundToggle();
@@ -4187,6 +4441,9 @@ document.addEventListener('DOMContentLoaded', () => {
   initTelegramBanner();
   initPwa();
   initSlider();
+  initSearchMotion();
+  initCardSpotlight();
+  initSectionReveal();
   bindEvents();
   syncHeaderHeight();
   updateFilterBadge();

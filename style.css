@@ -1212,10 +1212,23 @@ button { touch-action: manipulation; }
   text-transform: uppercase;
   white-space: nowrap;
 }
-.order-status.awaiting { color: var(--warning); background: rgba(255, 149, 0, 0.11); border: 1px solid rgba(255, 149, 0, 0.3); }
-.order-status.sent { color: var(--success); background: rgba(52, 199, 89, 0.1); border: 1px solid rgba(52, 199, 89, 0.3); }
+.order-status.created { color: var(--warning); background: rgba(255, 149, 0, 0.11); border: 1px solid rgba(255, 149, 0, 0.3); }
+.order-status.manager { color: var(--success); background: rgba(52, 199, 89, 0.1); border: 1px solid rgba(52, 199, 89, 0.3); }
+.order-status.delivery { color: #4db8ff; background: rgba(77, 184, 255, 0.1); border: 1px solid rgba(77, 184, 255, 0.3); }
 .order-status.canceled { color: var(--text-3); background: var(--surface-2); border: 1px solid var(--border); }
-.order-status.delivered { color: var(--accent); background: rgba(109, 223, 200, 0.1); border: 1px solid rgba(109, 223, 200, 0.32); }
+.order-status.received { color: var(--accent); background: rgba(109, 223, 200, 0.1); border: 1px solid rgba(109, 223, 200, 0.32); }
+
+.order-test-note {
+  margin: -4px 0 10px;
+  padding: 7px 10px;
+  border: 1px dashed rgba(255, 149, 0, 0.45);
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  color: var(--warning);
+  background: rgba(255, 149, 0, 0.06);
+}
 
 .order-timeline { display: flex; padding: 4px 0 14px; margin-bottom: 10px; }
 .order-step {
@@ -1793,4 +1806,336 @@ textarea:focus-visible,
   font-size: 11px;
   line-height: 1.35;
   color: var(--text-3);
+}
+
+/* ============================================================
+   ORGANIC MOTION
+   Сдержанные эффекты в духе Animata, Aceternity UI и Uiverse:
+   блик, ротация подсказок, мягкое проявление секций.
+   ============================================================ */
+
+/* --- Поиск: живая подсказка и мягкое свечение --- */
+.search-wrapper { isolation: isolate; }
+.search-wrapper::before {
+  content: '';
+  position: absolute;
+  inset: 9px;
+  border-radius: calc(var(--radius) + 4px);
+  background: radial-gradient(120% 150% at 50% 0%, rgba(109, 223, 200, 0.16), rgba(109, 223, 200, 0.03) 45%, transparent 72%);
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  pointer-events: none;
+  z-index: 0;
+}
+.search-wrapper:focus-within::before { opacity: 1; }
+.search-wrapper::after {
+  content: '';
+  position: absolute;
+  left: 22px;
+  right: 22px;
+  top: 15px;
+  height: 1px;
+  border-radius: 1px;
+  background: linear-gradient(90deg, transparent, rgba(109, 223, 200, 0.75), transparent);
+  opacity: 0;
+  transform: scaleX(0.35);
+  transition: opacity 0.3s ease, transform 0.55s cubic-bezier(0.2, 0.7, 0.3, 1);
+  pointer-events: none;
+  z-index: 2;
+}
+.search-wrapper:focus-within::after { opacity: 0.9; transform: scaleX(1); }
+.search-input {
+  position: relative;
+  z-index: 1;
+  transition: border-color 0.25s ease, background 0.25s ease, box-shadow 0.35s ease;
+}
+.search-input:focus {
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.42), 0 0 0 1px rgba(109, 223, 200, 0.22);
+}
+.search-icon {
+  z-index: 2;
+  transition: color 0.25s ease, transform 0.25s ease;
+}
+.search-wrapper:focus-within .search-icon { color: var(--accent); transform: translateY(-50%) scale(1.07); }
+.search-rotator {
+  position: absolute;
+  left: 64px;
+  right: 64px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-3);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  opacity: 1;
+  transition: opacity 0.26s ease, transform 0.26s ease;
+  z-index: 2;
+}
+.search-rotator.is-swapping { opacity: 0; transform: translateY(-50%) translateY(-7px); }
+.search-wrapper.has-value .search-rotator,
+.search-wrapper:focus-within .search-rotator { opacity: 0; }
+
+/* --- Блик по кнопкам (Animata Shining Button) --- */
+.checkout-btn,
+.card-btn,
+.btn-primary,
+.about-cta-btn,
+.order-action-btn.primary {
+  position: relative;
+  overflow: hidden;
+}
+.checkout-btn::after,
+.card-btn::after,
+.btn-primary::after,
+.about-cta-btn::after,
+.order-action-btn.primary::after {
+  content: '';
+  position: absolute;
+  top: -35%;
+  bottom: -35%;
+  left: -60%;
+  width: 42%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.55), transparent);
+  transform: translateX(0) skewX(-16deg);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 0.7s cubic-bezier(0.2, 0.7, 0.3, 1), opacity 0.2s ease;
+}
+.card-btn.is-added::after {
+  animation: addedSheen 0.8s cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+.card-btn.is-added { filter: brightness(1.04); }
+@keyframes addedSheen {
+  0% { transform: translateX(0) skewX(-16deg); opacity: 0; }
+  35% { opacity: 0.75; }
+  100% { transform: translateX(430%) skewX(-16deg); opacity: 0; }
+}
+@media (hover: hover) and (pointer: fine) {
+  .checkout-btn:hover::after,
+  .card-btn:hover::after,
+  .btn-primary:hover::after,
+  .about-cta-btn:hover::after,
+  .order-action-btn.primary:hover::after {
+    transform: translateX(430%) skewX(-16deg);
+    opacity: 0.8;
+  }
+}
+
+/* --- Таймлайн заказа (Animata Animated Timeline) --- */
+.order-step:not(:first-child)::before {
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: background 0.3s ease;
+}
+.order-step.done:not(:first-child)::before {
+  animation: orderLine 0.5s cubic-bezier(0.2, 0.7, 0.3, 1) forwards;
+  animation-delay: calc(var(--step-index, 0) * 70ms);
+}
+@keyframes orderLine {
+  to { transform: scaleX(1); }
+}
+.order-step-dot {
+  transition: background 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+}
+.order-step.done .order-step-dot {
+  animation: orderDot 0.45s cubic-bezier(0.2, 0.8, 0.3, 1.25) backwards;
+  animation-delay: calc(var(--step-index, 0) * 70ms);
+}
+@keyframes orderDot {
+  from { transform: scale(0.35); opacity: 0.3; }
+  to { transform: scale(1); opacity: 1; }
+}
+.order-step.current .order-step-dot::after {
+  content: '';
+  position: absolute;
+  inset: -5px;
+  border-radius: 50%;
+  border: 1px solid rgba(109, 223, 200, 0.42);
+  animation: orderPulse 2.8s ease-out infinite;
+  pointer-events: none;
+}
+@keyframes orderPulse {
+  0% { transform: scale(0.65); opacity: 0.6; }
+  70%, 100% { transform: scale(1.75); opacity: 0; }
+}
+
+/* --- Блик-спотлайт на карточках товара --- */
+.card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(220px circle at var(--mx, 50%) var(--my, 0%), rgba(109, 223, 200, 0.12), transparent 65%);
+  opacity: 0;
+  transition: opacity 0.35s ease;
+  pointer-events: none;
+  z-index: 0;
+}
+@media (hover: hover) and (pointer: fine) {
+  .card:hover::after { opacity: 1; }
+}
+
+/* --- Мягкое появление секций --- */
+.reveal {
+  opacity: 0;
+  transform: translateY(12px);
+  transition: opacity 0.5s ease, transform 0.55s cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+.reveal.is-visible { opacity: 1; transform: none; }
+
+/* --- Поля оформления (Uiverse-style focus) --- */
+.checkout-field { position: relative; }
+.checkout-label { transition: color 0.25s ease; }
+.checkout-field:focus-within .checkout-label { color: var(--accent); }
+.checkout-field input,
+.checkout-field textarea {
+  transition: border-color 0.25s ease, box-shadow 0.3s ease, background 0.3s ease, transform 0.25s ease;
+}
+.checkout-field:focus-within input:not(.invalid),
+.checkout-field:focus-within textarea:not(.invalid) {
+  background: #101211;
+  box-shadow: 0 0 0 3px rgba(109, 223, 200, 0.09), 0 10px 24px rgba(0, 0, 0, 0.32);
+  transform: translateY(-1px);
+}
+.checkout-field input::placeholder,
+.checkout-field textarea::placeholder { transition: opacity 0.25s ease; }
+.checkout-field input:focus::placeholder,
+.checkout-field textarea:focus::placeholder { opacity: 0.4; }
+
+/* --- Согласие на обработку персональных данных --- */
+.checkout-consent {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin: 2px 0 12px;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.checkout-consent input {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 17px;
+  height: 17px;
+  margin: 1px 0 0;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface-2);
+  flex-shrink: 0;
+  cursor: pointer;
+  position: relative;
+  transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.checkout-consent input:checked { background: var(--accent); border-color: var(--accent); }
+.checkout-consent input:checked::after {
+  content: '✓';
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #000;
+  font-size: 11px;
+  font-weight: 900;
+}
+.checkout-consent.invalid input { border-color: var(--danger); box-shadow: 0 0 0 2px rgba(255, 59, 48, 0.12); }
+.checkout-consent a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.checkout-consent-error { margin: -4px 0 12px; font-size: 11px; color: var(--danger); }
+
+/* --- Правовые страницы --- */
+.legal-page {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 20px 18px calc(120px + env(safe-area-inset-bottom, 0px));
+}
+.legal-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 18px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.legal-back:active { border-color: var(--accent); color: var(--accent); }
+.legal-title {
+  font-size: 22px;
+  line-height: 1.25;
+  font-weight: 900;
+  letter-spacing: 0.3px;
+  margin-bottom: 6px;
+}
+.legal-updated { font-size: 11px; color: var(--text-3); letter-spacing: 0.4px; text-transform: uppercase; }
+.legal-page h2 {
+  margin: 24px 0 8px;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.legal-page p,
+.legal-page li { font-size: 13px; line-height: 1.7; color: var(--text-2); }
+.legal-page p { margin-bottom: 10px; }
+.legal-page ul { margin: 6px 0 12px; padding-left: 18px; }
+.legal-page li { margin-bottom: 5px; }
+.legal-page a { color: var(--accent); text-underline-offset: 2px; }
+.legal-note {
+  margin-top: 26px;
+  padding: 12px 14px;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  color: var(--text-3);
+  font-size: 11px;
+}
+.about-legal-links {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 6px 16px 120px;
+}
+.about-legal-links a {
+  color: var(--text-3);
+  font-size: 11px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.about-legal-links a:active { color: var(--accent); }
+
+.legal-modal-content {
+  max-width: 560px;
+  height: min(86vh, 780px);
+  max-height: 86vh;
+  padding: 0;
+}
+.legal-modal-content .modal-header { padding: 16px 18px; flex-shrink: 0; }
+.legal-modal-content .modal-header h2 { font-size: 13px; letter-spacing: 0.6px; }
+.legal-modal-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 18px 18px 28px;
+  overscroll-behavior: contain;
+}
+.legal-modal-body .legal-page { padding: 0; max-width: none; }
+.legal-modal-body .legal-title { font-size: 18px; }
+.legal-modal-body .legal-updated { font-size: 10px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal { opacity: 1; transform: none; transition: none; }
+  .order-step.current .order-step-dot::after { display: none; }
+  .search-wrapper::after { display: none; }
 }

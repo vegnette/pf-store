@@ -27,6 +27,24 @@ const MAX_AUTH_AGE_SECONDS = 24 * 60 * 60;
 const STORE_URL = 'https://vegnette.github.io/pf-store/';
 const MANAGER_USERNAME = 'PF_Store_manager';
 
+// Четыре этапа заказа + отмена. Старые статусы приводим к новым.
+const ORDER_STATUSES = ['created', 'manager', 'delivery', 'received', 'canceled'];
+const STATUS_ALIASES = {
+  awaiting: 'created',
+  sent: 'manager',
+  delivered: 'received'
+};
+
+function normalizeStatus(status) {
+  const next = STATUS_ALIASES[status] || status;
+  return ORDER_STATUSES.includes(next) ? next : 'created';
+}
+
+// Тестовые заказы не попадают в историю, отчёт и статистику.
+function isTestOrder(order) {
+  return Boolean(order) && (order.test === true || /^test/i.test(String(order.id || '')));
+}
+
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
@@ -113,7 +131,9 @@ function isManager(user, env) {
 }
 
 async function getOrder(env, id) {
-  return env.ORDERS_KV.get(`order:${id}`, 'json');
+  const order = await env.ORDERS_KV.get(`order:${id}`, 'json');
+  if (!order) return null;
+  return { ...order, status: normalizeStatus(order.status) };
 }
 
 async function putOrder(env, order) {
@@ -125,7 +145,9 @@ async function listOrders(env) {
   const orders = await Promise.all(
     list.keys.map(key => env.ORDERS_KV.get(key.name, 'json'))
   );
-  return orders.filter(Boolean);
+  return orders
+    .filter(Boolean)
+    .map(order => ({ ...order, status: normalizeStatus(order.status) }));
 }
 
 async function sendTelegram(env, token, chatId, text, replyMarkup) {
@@ -252,6 +274,7 @@ async function sendDailyReport(env) {
   const { start, end } = barnaulDayRange();
   const orders = await listOrders(env);
   const today = orders.filter(order => {
+    if (isTestOrder(order)) return false;
     const time = new Date(order.createdAt || order.updatedAt || 0).getTime();
     return time >= start && time < end;
   });
@@ -271,7 +294,7 @@ async function sendDailyReport(env) {
   const canceled = today.filter(order => order.status === 'canceled');
   const active = today.filter(order => order.status !== 'canceled');
   const revenue = active.reduce((sum, order) => sum + (Number(order.total) || 0), 0);
-  const awaiting = active.filter(order => order.status === 'awaiting').length;
+  const awaiting = active.filter(order => order.status === 'created').length;
 
   const items = new Map();
   active.forEach(order => {
@@ -384,7 +407,7 @@ export default {
       const orders = await listOrders(env);
       const visible = isManager(user, env)
         ? orders
-        : orders.filter(order => String(order.user?.id) === String(user.id));
+        : orders.filter(order => !isTestOrder(order) && String(order.user?.id) === String(user.id));
 
       visible.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
 
@@ -456,20 +479,37 @@ export default {
       const order = await getOrder(env, body.id);
       if (!order) return json({ error: 'not_found' }, 404);
 
-      const allowed = ['awaiting', 'sent', 'delivered', 'canceled'];
-      if (!allowed.includes(body.status)) return json({ error: 'bad_status' }, 400);
+      const status = normalizeStatus(body.status);
+      if (!ORDER_STATUSES.includes(status)) return json({ error: 'bad_status' }, 400);
 
-      order.status = body.status;
+      order.status = status;
       order.updatedAt = new Date().toISOString();
       order.updatedBy = user.username || user.first_name || 'manager';
-      if (body.status === 'sent' && !order.confirmedAt) order.confirmedAt = order.updatedAt;
-      if (body.status === 'delivered') {
+      if (status === 'manager' && !order.confirmedAt) order.confirmedAt = order.updatedAt;
+      if (status === 'delivery') {
+        if (!order.confirmedAt) order.confirmedAt = order.updatedAt;
+        order.shippedAt = order.updatedAt;
+      }
+      if (status === 'received') {
         if (!order.confirmedAt) order.confirmedAt = order.updatedAt;
         order.deliveredAt = order.updatedAt;
+        order.receivedAt = order.updatedAt;
       }
 
       await putOrder(env, order);
       return json({ order });
+    }
+
+    // Удаление тестового заказа менеджером.
+    if (body.type === 'delete') {
+      if (!manager) return json({ error: 'manager_only' }, 403);
+
+      const order = await getOrder(env, body.id);
+      if (!order) return json({ error: 'not_found' }, 404);
+      if (!isTestOrder(order)) return json({ error: 'test_only' }, 403);
+
+      await env.ORDERS_KV.delete(`order:${order.id}`);
+      return json({ ok: true });
     }
 
     // Создание или обновление заказа
@@ -495,20 +535,22 @@ export default {
 
     if (!manager) {
       // Покупатель может только подтвердить отправку своего заказа.
-      const currentStatus = existing ? existing.status : 'awaiting';
-      if (!order.status) order.status = currentStatus;
-      if (order.status !== currentStatus) {
-        if (!(currentStatus === 'awaiting' && order.status === 'sent')) {
+      const currentStatus = existing ? normalizeStatus(existing.status) : 'created';
+      const nextStatus = normalizeStatus(order.status || currentStatus);
+      if (nextStatus !== currentStatus) {
+        if (!(currentStatus === 'created' && nextStatus === 'manager')) {
           return json({ error: 'status_manager_only' }, 403);
         }
       }
-      if (!existing) order.status = 'awaiting';
+      order.status = existing ? nextStatus : 'created';
+    } else {
+      order.status = normalizeStatus(order.status);
     }
 
     const isNew = !existing;
     await putOrder(env, order);
 
-    if (isNew && !manager) {
+    if (isNew && !manager && !isTestOrder(order)) {
       await notifyManager(env, order);
     }
 
