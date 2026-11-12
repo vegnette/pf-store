@@ -85,6 +85,20 @@ async function verifyInitData(initData, botToken) {
   }
 }
 
+function botTokens(env) {
+  return [env.BOT_TOKEN, env.BOT_TOKEN_MAIN].filter(Boolean);
+}
+
+// Подпись initData зависит от бота, через которого открыто мини-приложение.
+// Поэтому проверяем токеном админ-бота и, если задан, основного бота магазина.
+async function verifyAnyBot(initData, env) {
+  for (const token of botTokens(env)) {
+    const user = await verifyInitData(initData, token);
+    if (user) return user;
+  }
+  return null;
+}
+
 function managerIds(env) {
   return String(env.MANAGER_IDS || '')
     .split(',')
@@ -110,6 +124,29 @@ async function listOrders(env) {
     list.keys.map(key => env.ORDERS_KV.get(key.name, 'json'))
   );
   return orders.filter(Boolean);
+}
+
+async function sendTelegram(env, token, chatId, text) {
+  if (!token || !chatId) return false;
+
+  try {
+    const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text, disable_web_page_preview: true })
+    });
+    const payload = await response.json().catch(() => null);
+
+    if (!response.ok || !payload?.ok) {
+      console.error('telegram_send_failed', response.status, payload?.description || 'unknown');
+      return false;
+    }
+
+    return true;
+  } catch (error) {
+    console.error('telegram_send_error', error.message);
+    return false;
+  }
 }
 
 async function notifyManager(env, order) {
@@ -141,27 +178,111 @@ async function notifyManager(env, order) {
     if (order.delivery.comment) lines.push(`Комментарий: ${order.delivery.comment}`);
   }
 
-  try {
-    const response = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: env.MANAGER_CHAT_ID,
-        text: lines.join('\n')
-      })
-    });
-    const payload = await response.json().catch(() => null);
-    if (!response.ok || !payload?.ok) {
-      console.error('telegram_notify_failed', response.status, payload?.description || 'unknown');
-    } else {
-      const chat = payload.result?.chat || {};
-      const from = payload.result?.from || {};
-      console.log('telegram_notify_ok', chat.id, chat.username || chat.first_name || chat.type || '', 'bot=', from.username || '');
-    }
-  } catch (error) {
-    // уведомление не должно ломать сохранение заказа
-    console.error('telegram_notify_error', error.message);
+  await sendTelegram(env, env.BOT_TOKEN, env.MANAGER_CHAT_ID, lines.join('\n'));
+}
+
+// --- НАЛИЧИЕ ---
+
+function stockKey(productId) {
+  return `stock:${productId}`;
+}
+
+async function getStockOverrides(env) {
+  const list = await env.ORDERS_KV.list({ prefix: 'stock:' });
+  const values = await Promise.all(
+    list.keys.map(async key => [key.name.slice(6), Number(await env.ORDERS_KV.get(key.name))])
+  );
+
+  return Object.fromEntries(values.filter(([, value]) => Number.isFinite(value)));
+}
+
+async function notifyWatchers(env, productId, title, price) {
+  const list = await env.ORDERS_KV.list({ prefix: `watch:${productId}:` });
+  if (!list.keys.length) return 0;
+
+  const text = [
+    `🔥 ${title || 'Товар'} снова в наличии${price ? ` — ${price} ₽` : ''}!`,
+    'Успейте заказать, пока не разобрали.',
+    `https://vegnette.github.io/pf-store/?product=${productId}`
+  ].join('\n');
+
+  const token = env.BOT_TOKEN_MAIN || env.BOT_TOKEN;
+  let sent = 0;
+
+  for (const key of list.keys) {
+    const watcher = await env.ORDERS_KV.get(key.name, 'json');
+    if (watcher?.id && await sendTelegram(env, token, watcher.id, text)) sent += 1;
+    await env.ORDERS_KV.delete(key.name);
   }
+
+  return sent;
+}
+
+// --- ОТЧЁТ ЗА ДЕНЬ ---
+
+function barnaulDayRange(now = Date.now()) {
+  const offset = 7 * 60 * 60 * 1000;
+  const shifted = new Date(now + offset);
+  const start = Date.UTC(
+    shifted.getUTCFullYear(),
+    shifted.getUTCMonth(),
+    shifted.getUTCDate()
+  ) - offset;
+
+  return { start, end: start + 24 * 60 * 60 * 1000 };
+}
+
+function formatMoney(value) {
+  return `${Math.round(Number(value) || 0).toLocaleString('ru-RU')} ₽`;
+}
+
+async function sendDailyReport(env) {
+  if (!env.BOT_TOKEN || !env.MANAGER_CHAT_ID) return;
+
+  const { start, end } = barnaulDayRange();
+  const orders = await listOrders(env);
+  const today = orders.filter(order => {
+    const time = new Date(order.createdAt || order.updatedAt || 0).getTime();
+    return time >= start && time < end;
+  });
+
+  const day = new Date(start + 7 * 60 * 60 * 1000);
+  const date = [
+    String(day.getUTCDate()).padStart(2, '0'),
+    String(day.getUTCMonth() + 1).padStart(2, '0'),
+    day.getUTCFullYear()
+  ].join('.');
+
+  if (!today.length) {
+    await sendTelegram(env, env.BOT_TOKEN, env.MANAGER_CHAT_ID, `📊 ${date}\nЗаказов сегодня не было.`);
+    return;
+  }
+
+  const canceled = today.filter(order => order.status === 'canceled');
+  const active = today.filter(order => order.status !== 'canceled');
+  const revenue = active.reduce((sum, order) => sum + (Number(order.total) || 0), 0);
+  const awaiting = active.filter(order => order.status === 'awaiting').length;
+
+  const items = new Map();
+  active.forEach(order => {
+    (order.items || []).forEach(item => {
+      const title = item.title || 'Товар';
+      items.set(title, (items.get(title) || 0) + (Number(item.qty) || 1));
+    });
+  });
+  const top = [...items.entries()].sort((a, b) => b[1] - a[1])[0];
+
+  const lines = [
+    `📊 Итоги дня · ${date}`,
+    `Заказов: ${today.length}${canceled.length ? ` (отменено: ${canceled.length})` : ''}`,
+    `Выручка: ${formatMoney(revenue)}`,
+    `Средний чек: ${formatMoney(active.length ? revenue / active.length : 0)}`
+  ];
+
+  if (top) lines.push(`Топ товар: ${top[0]} × ${top[1]}`);
+  if (awaiting) lines.push(`Ждут подтверждения: ${awaiting}`);
+
+  await sendTelegram(env, env.BOT_TOKEN, env.MANAGER_CHAT_ID, lines.join('\n'));
 }
 
 export default {
@@ -172,9 +293,22 @@ export default {
 
     const url = new URL(request.url);
 
+    // Публичный список изменений наличия (что менеджер поменял вручную).
+    if (url.pathname === '/stock' && request.method === 'GET') {
+      return json({ stock: await getStockOverrides(env) });
+    }
+
+    // Ручной запуск дневного отчёта (ключ задаётся секретом REPORT_KEY).
+    if (url.pathname === '/run-report' && request.method === 'POST') {
+      const key = request.headers.get('x-report-key') || '';
+      if (!env.REPORT_KEY || key !== env.REPORT_KEY) return json({ error: 'forbidden' }, 403);
+      await sendDailyReport(env);
+      return json({ ok: true });
+    }
+
     if (request.method === 'GET') {
       const initData = url.searchParams.get('initData') || '';
-      const user = await verifyInitData(initData, env.BOT_TOKEN);
+      const user = await verifyAnyBot(initData, env);
       if (!user) return json({ error: 'invalid_init_data' }, 401);
 
       const orders = await listOrders(env);
@@ -198,10 +332,52 @@ export default {
       return json({ error: 'invalid_json' }, 400);
     }
 
-    const user = await verifyInitData(body.initData || '', env.BOT_TOKEN);
+    const user = await verifyAnyBot(body.initData || '', env);
     if (!user) return json({ error: 'invalid_init_data' }, 401);
 
     const manager = isManager(user, env);
+
+    // Подписка на поступление товара
+    if (body.type === 'watch') {
+      const productId = String(body.productId || '').trim();
+      if (!productId) return json({ error: 'invalid_product' }, 400);
+
+      await env.ORDERS_KV.put(
+        `watch:${productId}:${user.id}`,
+        JSON.stringify({
+          id: user.id,
+          name: user.first_name || '',
+          username: user.username || '',
+          at: new Date().toISOString()
+        })
+      );
+
+      const canNotify = await sendTelegram(
+        env,
+        env.BOT_TOKEN_MAIN || env.BOT_TOKEN,
+        user.id,
+        '✅ Подписка оформлена. Напишем, когда товар снова появится в наличии.'
+      );
+
+      return json({ ok: true, canNotify });
+    }
+
+    // Изменение наличия менеджером
+    if (body.type === 'stock') {
+      if (!manager) return json({ error: 'manager_only' }, 403);
+
+      const productId = String(body.productId || '').trim();
+      if (!productId) return json({ error: 'invalid_product' }, 400);
+
+      const stock = Math.max(0, Math.min(999, Math.round(Number(body.stock) || 0)));
+      await env.ORDERS_KV.put(stockKey(productId), String(stock));
+
+      const notified = stock > 0
+        ? await notifyWatchers(env, productId, String(body.title || ''), Number(body.price) || 0)
+        : 0;
+
+      return json({ stock, notified });
+    }
 
     // Смена статуса менеджером
     if (body.type === 'status') {
@@ -267,5 +443,9 @@ export default {
     }
 
     return json({ order });
+  },
+
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(sendDailyReport(env));
   }
 };

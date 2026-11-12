@@ -4,7 +4,7 @@
 const TELEGRAM_USERNAME = 'PF_Store_manager';
 // Юзернейм бота, через которого открывается мини-приложение (без @).
 // Если заполнить, гостю в профиле появится кнопка «Открыть в Telegram».
-const TELEGRAM_BOT_USERNAME = 'pfadmin_bot';
+const TELEGRAM_BOT_USERNAME = 'PF_Store22_bot';
 const STORE_NAME = 'PF Store';
 const STORE_TIMEZONE = 'Asia/Barnaul';
 const STORE_UTC_OFFSET_HOURS = 7;
@@ -41,6 +41,7 @@ const SORT_MODES = ['popular', 'price-asc', 'price-desc', 'discount', 'new'];
 let tg = window.Telegram?.WebApp || null;
 let products = [];
 let productsLoaded = false;
+let stockOverrides = {};
 let currentCategory = 'all';
 let searchQuery = '';
 let currentView = 'home';
@@ -741,8 +742,35 @@ function openManagerChat(product) {
   triggerHaptic('selection');
 }
 
-function openStockNotify(product) {
+async function openStockNotify(product) {
   if (!product) return;
+
+  const initData = ensureTelegramApp()?.initData || '';
+
+  if (ORDERS_ENDPOINT && initData) {
+    try {
+      const response = await fetch(ORDERS_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'watch', productId: String(product.id), initData })
+      });
+      const data = await response.json().catch(() => ({}));
+
+      if (response.ok) {
+        playSound('success');
+        triggerHaptic('success');
+        showToast(
+          data.canNotify === false
+            ? `Подписка сохранена. Нажмите Start в @${TELEGRAM_BOT_USERNAME}, чтобы бот смог написать`
+            : 'Сообщим, как только товар появится',
+          data.canNotify === false ? 'error' : 'success'
+        );
+        return;
+      }
+    } catch (error) {
+      // ниже — резервный вариант через чат с менеджером
+    }
+  }
 
   const url = `${location.origin}${location.pathname}?product=${product.id}`;
   const text = `Здравствуйте! Сообщите, пожалуйста, когда появится в наличии: ${product.title} — ${formatPrice(product.price)}. Ссылка: ${url}`;
@@ -751,6 +779,43 @@ function openStockNotify(product) {
   playSound('tap');
   triggerHaptic('selection');
   showToast('Запрос открыт в Telegram', 'success');
+}
+
+async function loadStockOverrides() {
+  if (!ORDERS_ENDPOINT) return;
+
+  try {
+    const response = await fetch(`${ORDERS_ENDPOINT}/stock`, { headers: { Accept: 'application/json' } });
+    if (!response.ok) return;
+
+    const data = await response.json();
+    const stock = data?.stock;
+    if (!stock || typeof stock !== 'object') return;
+
+    stockOverrides = stock;
+    applyStockOverrides();
+  } catch (error) {
+    // офлайн — остаются значения из products.json
+  }
+}
+
+function applyStockOverrides() {
+  let changed = false;
+
+  products.forEach(product => {
+    const value = stockOverrides[String(product.id)];
+    if (value !== undefined && Number.isFinite(Number(value))) {
+      product.stock = Number(value);
+      changed = true;
+    }
+  });
+
+  if (!changed) return;
+
+  renderCatalog();
+  renderRecent();
+  updateUI();
+  updateFavoriteUI();
 }
 
 function copyText(text) {
@@ -1394,6 +1459,29 @@ function setTelegramStatus(state) {
   }
 }
 
+function initTelegramBanner() {
+  const banner = document.getElementById('tgBanner');
+  if (!banner) return;
+
+  const dismissed = localStorage.getItem('pf_tg_banner') === 'off';
+  const inTelegram = isTelegramEnvironment() || /Telegram/i.test(navigator.userAgent);
+
+  if (dismissed || inTelegram) {
+    banner.hidden = true;
+    return;
+  }
+
+  const closeBtn = document.getElementById('tgBannerClose');
+  if (closeBtn) {
+    closeBtn.addEventListener('click', () => {
+      banner.hidden = true;
+      localStorage.setItem('pf_tg_banner', 'off');
+    });
+  }
+
+  banner.hidden = false;
+}
+
 function applyManagerUI() {
   const roleEl = document.getElementById('profileRole');
   const subtitleEl = document.getElementById('profileSubtitle');
@@ -1637,12 +1725,16 @@ function syncOrderStatus(order) {
 
 async function loadOrdersFromServer() {
   if (!ORDERS_ENDPOINT || ordersLoading) return;
+
+  const initData = ensureTelegramApp()?.initData || '';
+  // Без мини-приложения Telegram сервер не отдаст заказы — не шлём лишний запрос.
+  if (!initData) return;
+
   ordersLoading = true;
 
   try {
-    const initData = ensureTelegramApp()?.initData || '';
     const url = new URL(ORDERS_ENDPOINT, location.href);
-    if (initData) url.searchParams.set('initData', initData);
+    url.searchParams.set('initData', initData);
 
     const response = await fetch(url.toString(), {
       method: 'GET',
@@ -2145,6 +2237,7 @@ async function loadProducts() {
     updateFavoriteUI();
     updateStoreStatus();
     handleDeepLink();
+    loadStockOverrides();
 
     if (drops > 0) {
       notifyPriceDrops(drops);
@@ -2602,15 +2695,7 @@ function openProduct(id) {
   const oldPriceEl = document.getElementById('productOldPrice');
   oldPriceEl.textContent = product.oldPrice && product.oldPrice > product.price ? formatPrice(product.oldPrice) : '';
 
-  const stockEl = document.getElementById('productStock');
-  const stock = Number(product.stock) || 0;
-  if (stock > 0) {
-    stockEl.textContent = `В НАЛИЧИИ: ${stock} ШТ.`;
-    stockEl.className = 'product-stock-status' + (stock <= 5 ? ' low' : '');
-  } else {
-    stockEl.textContent = 'НЕТ В НАЛИЧИИ — ДОСТУПЕН ПОД ЗАКАЗ';
-    stockEl.className = 'product-stock-status out';
-  }
+  renderProductStock(product);
 
   renderProductGift(product);
 
@@ -2628,17 +2713,14 @@ function openProduct(id) {
   updateFavoriteUI();
 
   const addToCartBtn = document.getElementById('addToCart');
-  addToCartBtn.textContent = stock > 0 ? 'В КОРЗИНУ' : 'ЗАКАЗАТЬ ПОД ЗАКАЗ';
-  addToCartBtn.style.opacity = stock > 0 ? '1' : '0.85';
-  addToCartBtn.onclick = () => {
-    if (addToCart(product.id)) closeModal(modal);
-  };
+  if (addToCartBtn) {
+    addToCartBtn.onclick = () => {
+      if (addToCart(product.id)) closeModal(modal);
+    };
+  }
 
   const stockNotifyBtn = document.getElementById('stockNotifyBtn');
-  if (stockNotifyBtn) {
-    stockNotifyBtn.hidden = stock > 0;
-    stockNotifyBtn.onclick = () => openStockNotify(product);
-  }
+  if (stockNotifyBtn) stockNotifyBtn.onclick = () => openStockNotify(product);
 
   // Описание загружаем в фоне, чтобы карточка открывалась мгновенно
   if (descRequest) descRequest.abort();
@@ -2675,6 +2757,114 @@ function openProduct(id) {
     if (scroller) scroller.scrollTop = 0;
     gallery.scrollLeft = 0;
   });
+}
+
+function renderProductStock(product) {
+  const stockEl = document.getElementById('productStock');
+  if (!stockEl || !product) return;
+
+  const stock = Number(product.stock) || 0;
+
+  if (stock > 0) {
+    stockEl.textContent = `В НАЛИЧИИ: ${stock} ШТ.`;
+    stockEl.className = 'product-stock-status' + (stock <= 5 ? ' low' : '');
+  } else {
+    stockEl.textContent = 'НЕТ В НАЛИЧИИ — ДОСТУПЕН ПОД ЗАКАЗ';
+    stockEl.className = 'product-stock-status out';
+  }
+
+  const addToCartBtn = document.getElementById('addToCart');
+  if (addToCartBtn) {
+    addToCartBtn.textContent = stock > 0 ? 'В КОРЗИНУ' : 'ЗАКАЗАТЬ ПОД ЗАКАЗ';
+    addToCartBtn.style.opacity = stock > 0 ? '1' : '0.85';
+  }
+
+  const stockNotifyBtn = document.getElementById('stockNotifyBtn');
+  if (stockNotifyBtn) stockNotifyBtn.hidden = stock > 0;
+
+  renderStockEditor(product);
+}
+
+function renderStockEditor(product) {
+  const editor = document.getElementById('stockEditor');
+  if (!editor) return;
+
+  editor.hidden = !isManager || !ORDERS_ENDPOINT;
+  if (editor.hidden) return;
+
+  const valueEl = document.getElementById('stockValue');
+  const minus = document.getElementById('stockMinus');
+  const plus = document.getElementById('stockPlus');
+  if (!valueEl || !minus || !plus) return;
+
+  let value = Math.max(0, Number(product.stock) || 0);
+  valueEl.textContent = String(value);
+
+  const apply = async next => {
+    const previous = value;
+    value = Math.max(0, Math.min(99, next));
+    valueEl.textContent = String(value);
+    product.stock = value;
+    stockOverrides[String(product.id)] = value;
+    renderProductStock(product);
+
+    const saved = await saveProductStock(product, value);
+    if (!saved) {
+      value = previous;
+      product.stock = previous;
+      stockOverrides[String(product.id)] = previous;
+      renderProductStock(product);
+    }
+  };
+
+  minus.onclick = () => apply(value - 1);
+  plus.onclick = () => apply(value + 1);
+}
+
+async function saveProductStock(product, stock) {
+  const initData = ensureTelegramApp()?.initData || '';
+
+  if (!ORDERS_ENDPOINT || !initData) {
+    showToast('Откройте сайт через Telegram, чтобы менять наличие', 'error');
+    return false;
+  }
+
+  try {
+    const response = await fetch(ORDERS_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'stock',
+        productId: String(product.id),
+        stock,
+        title: product.title,
+        price: product.price,
+        initData
+      })
+    });
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      showToast(data.error === 'manager_only' ? 'Нет прав менеджера' : 'Не удалось сохранить наличие', 'error');
+      return false;
+    }
+
+    const hint = document.getElementById('stockEditorHint');
+    if (hint) {
+      hint.textContent = data.notified
+        ? `Уведомление о поступлении получили: ${data.notified}`
+        : 'Когда наличие станет больше нуля, подписчики получат сообщение.';
+    }
+
+    playSound('success');
+    triggerHaptic('success');
+    showToast(stock > 0 ? `Наличие обновлено: ${stock} шт.` : 'Товар помечен как отсутствующий', 'success');
+    renderCatalog();
+    return true;
+  } catch (error) {
+    showToast('Нет связи с сервером', 'error');
+    return false;
+  }
 }
 
 function renderProductGift(product) {
@@ -3994,6 +4184,7 @@ document.addEventListener('DOMContentLoaded', () => {
   updateGreeting(null);
   updateSoundToggle();
   initTelegram();
+  initTelegramBanner();
   initPwa();
   initSlider();
   bindEvents();
@@ -4025,6 +4216,7 @@ document.addEventListener('DOMContentLoaded', () => {
   window.addEventListener('load', () => {
     syncHeaderHeight();
     initTelegram();
+    initTelegramBanner();
   });
 });
 

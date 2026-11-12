@@ -1667,3 +1667,130 @@ textarea:focus-visible,
     scroll-behavior: auto !important;
   }
 }
+
+/* ── Плашка «Открыть в Telegram» ─────────────────────────── */
+.tg-banner {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid rgba(109, 223, 200, 0.45);
+  border-radius: 16px;
+  background: rgba(10, 22, 20, 0.96);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(10px);
+  animation: tgBannerIn 0.25s ease-out;
+}
+
+@keyframes tgBannerIn {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.tg-banner-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.tg-banner-text strong {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+  color: var(--text);
+}
+
+.tg-banner-text span {
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-2);
+}
+
+.tg-banner-btn {
+  flex: none;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #04110e;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.4px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.tg-banner-close {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.tg-banner-close:hover { color: var(--text); }
+
+/* ── Редактор наличия (только для менеджера) ─────────────── */
+.stock-editor {
+  margin: 14px 0 4px;
+  padding: 12px 14px;
+  border: 1px solid rgba(109, 223, 200, 0.35);
+  border-radius: 14px;
+  background: rgba(109, 223, 200, 0.06);
+}
+
+.stock-editor-label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 1px;
+  color: var(--accent);
+}
+
+.stock-editor-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.stock-editor-controls button {
+  width: 40px;
+  height: 40px;
+  border: 1px solid rgba(109, 223, 200, 0.4);
+  border-radius: 10px;
+  background: rgba(109, 223, 200, 0.12);
+  color: var(--accent);
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.stock-editor-controls button:active { transform: scale(0.95); }
+
+#stockValue {
+  min-width: 42px;
+  text-align: center;
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--text);
+}
+
+.stock-editor-hint {
+  margin-top: 8px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-3);
+}

@@ -52,6 +52,15 @@
 </head>
 <body>
 
+  <div class="tg-banner" id="tgBanner" hidden>
+    <div class="tg-banner-text">
+      <strong>Заказы и статусы — в Telegram</strong>
+      <span>Откройте мини-приложение: имя, история заказов и уведомления о поступлении.</span>
+    </div>
+    <a class="tg-banner-btn" id="tgBannerBtn" href="https://t.me/PF_Store22_bot" target="_blank" rel="noopener">Открыть</a>
+    <button type="button" class="tg-banner-close" id="tgBannerClose" aria-label="Скрыть подсказку">✕</button>
+  </div>
+
   <div class="scroll-progress" id="scrollProgress" aria-hidden="true"></div>
 
   <header class="header" id="mainHeader">
@@ -525,6 +534,15 @@
           <button class="btn-primary" id="addToCart" style="width: 100%;">В КОРЗИНУ</button>
         </div>
         <button class="btn-stock-notify" id="stockNotifyBtn" type="button" hidden>СООБЩИТЬ О ПОСТУПЛЕНИИ</button>
+        <div class="stock-editor" id="stockEditor" hidden>
+          <span class="stock-editor-label">НАЛИЧИЕ · МЕНЕДЖЕР</span>
+          <div class="stock-editor-controls">
+            <button type="button" id="stockMinus" aria-label="Уменьшить наличие">−</button>
+            <span id="stockValue">0</span>
+            <button type="button" id="stockPlus" aria-label="Увеличить наличие">+</button>
+          </div>
+          <div class="stock-editor-hint" id="stockEditorHint">Когда наличие станет больше нуля, подписчики получат сообщение.</div>
+        </div>
         <p class="product-desc" id="productDesc">Загрузка описания...</p>
         <div class="similar-block" id="similarBlock" hidden>
           <div class="similar-title">Похожие товары</div>

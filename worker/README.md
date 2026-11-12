@@ -26,11 +26,45 @@
 - Адрес: <https://pf-store-orders.vegnette.workers.dev>
 - KV-хранилище `ORDERS_KV`: `3ed4e74283f24d14bd41fc81fde40fba`
 - Менеджер: Telegram ID `5352101935`, бот `@pfadmin_bot`
-- Секреты `BOT_TOKEN` и `MANAGER_CHAT_ID` заданы в Cloudflare, в репозитории их нет.
+- Основной бот для покупателей: `@PF_Store22_bot` (токен добавляется секретом `BOT_TOKEN_MAIN`)
+- Секреты `BOT_TOKEN`, `MANAGER_CHAT_ID` и `REPORT_KEY` заданы в Cloudflare, в репозитории их нет.
 - В `script.js` прописан `ORDERS_ENDPOINT` на этот адрес.
+- Cron `0 14 * * *` (21:00 по Барнаулу) присылает ежедневный отчёт.
 
 Проверка: `curl https://pf-store-orders.vegnette.workers.dev/` должен вернуть
 `401 {"error":"invalid_init_data"}` — значит, Worker жив и требует подпись Telegram.
+
+## Наличие и подписки
+
+- `GET /stock` — публичный список ручных изменений наличия: `{"stock":{"2":3}}`.
+- `POST /` `{ type:'stock', productId, stock, title, price, initData }` — менеджер
+  меняет наличие. Если `stock > 0`, всем подписчикам уходит сообщение.
+- `POST /` `{ type:'watch', productId, initData }` — покупатель подписывается
+  на поступление. `canNotify:false` значит, что бот не смог написать:
+  человек не нажал `/start` у основного бота.
+
+Подписки хранятся в KV с префиксом `watch:<товар>:<id>`, изменения наличия —
+`stock:<товар>`. Подписка удаляется после успешного уведомления.
+
+## Ежедневный отчёт
+
+Cron `0 14 * * *` (14:00 UTC = 21:00 Барнаул) собирает заказы за барнаульские
+сутки и шлёт в `MANAGER_CHAT_ID`: число заказов, выручку, средний чек,
+топ-товар и сколько заказов ждут подтверждения.
+
+Ручной запуск (нужен секрет `REPORT_KEY`):
+
+```bash
+curl -X POST https://pf-store-orders.vegnette.workers.dev/run-report \
+  -H "X-Report-Key: ВАШ_КЛЮЧ"
+```
+
+## Плашка «Открыть в Telegram»
+
+В обычном браузере внизу появляется плашка с кнопкой на основного бота.
+Она скрывается в мини-приложении Telegram и после нажатия «✕» (запоминается
+в `localStorage`).
+
 
 ## Шаг 1. Бот
 
