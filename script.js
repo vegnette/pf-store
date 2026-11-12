@@ -761,8 +761,8 @@ async function openStockNotify(product) {
         triggerHaptic('success');
         showToast(
           data.canNotify === false
-            ? `Подписка сохранена. Нажмите Start в @${TELEGRAM_BOT_USERNAME}, чтобы бот смог написать`
-            : 'Сообщим, как только товар появится',
+            ? `Готово! Осталось нажать Start в @${TELEGRAM_BOT_USERNAME} — и мы напишем о поступлении`
+            : 'Готово! Напишем, как только товар появится',
           data.canNotify === false ? 'error' : 'success'
         );
         return;
