@@ -1928,7 +1928,7 @@ textarea:focus-visible,
 
 /* --- Таймлайн заказа (Animata Animated Timeline) --- */
 .order-step:not(:first-child)::before {
-  transform: scaleX(0);
+  transform: scaleX(1);
   transform-origin: left center;
   transition: background 0.3s ease;
 }
@@ -1937,6 +1937,7 @@ textarea:focus-visible,
   animation-delay: calc(var(--step-index, 0) * 70ms);
 }
 @keyframes orderLine {
+  from { transform: scaleX(0); }
   to { transform: scaleX(1); }
 }
 .order-step-dot {
