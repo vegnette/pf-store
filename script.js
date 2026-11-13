@@ -91,8 +91,6 @@ const soundState = {
 };
 
 // --- КАРУСЕЛЬ БАННЕРОВ ---
-let currentSlide = 0;
-let slideInterval = null;
 
 const fallbackProducts = [
   { id: 1, category: 'watches', title: 'Apple Watch S11 46mm', price: 1500, oldPrice: 3000, stock: 3, badges: ['hit'], desc_file: './images/Watch 11/1.txt', images: ['./images/Watch 11/1.jpg'], gift_desc: '🎁 Ремешок в подарок!' }
@@ -3906,7 +3904,6 @@ function setView(view) {
   const viewAbout = document.getElementById('view-about');
   const viewFavorites = document.getElementById('view-favorites');
   const searchWrap = document.getElementById('searchWrapper');
-  const slider = document.querySelector('.slider-container');
   const categories = document.getElementById('categories');
   const controls = document.querySelector('.controls');
   const header = document.getElementById('mainHeader');
@@ -3922,7 +3919,6 @@ function setView(view) {
   });
 
   if (searchWrap) searchWrap.style.display = view === 'home' ? 'block' : 'none';
-  if (slider) slider.style.display = view === 'home' ? 'block' : 'none';
   if (categories) categories.style.display = view === 'home' ? 'flex' : 'none';
   if (controls) controls.style.display = view === 'home' ? 'flex' : 'none';
 
@@ -3956,62 +3952,6 @@ function syncHeaderHeight() {
   const header = document.getElementById('mainHeader');
   if (!header) return;
   document.documentElement.style.setProperty('--header-h', `${header.offsetHeight}px`);
-}
-
-// ============================================================
-// КАРУСЕЛЬ
-// ============================================================
-
-function initSlider() {
-  const track = document.getElementById('sliderTrack');
-  const container = document.querySelector('.slider-container');
-  const dots = Array.from(document.querySelectorAll('#sliderDots .dot'));
-  if (!track || !container || !dots.length) return;
-
-  const totalSlides = dots.length;
-
-  window.goToSlide = index => {
-    currentSlide = ((index % totalSlides) + totalSlides) % totalSlides;
-    track.style.transform = `translateX(-${currentSlide * 100}%)`;
-    dots.forEach((dot, i) => dot.classList.toggle('active', i === currentSlide));
-  };
-
-  window.nextSlide = () => {
-    if (currentView !== 'home' || document.hidden || modalStack.length) return;
-    window.goToSlide(currentSlide + 1);
-  };
-
-  const restartAutoplay = () => {
-    clearInterval(slideInterval);
-    slideInterval = setInterval(window.nextSlide, 4500);
-  };
-
-  let touchStartX = 0;
-  let touchEndX = 0;
-
-  container.addEventListener('touchstart', event => {
-    touchStartX = event.changedTouches[0].screenX;
-    clearInterval(slideInterval);
-  }, { passive: true });
-
-  container.addEventListener('touchend', event => {
-    touchEndX = event.changedTouches[0].screenX;
-    const threshold = 50;
-
-    if (touchEndX < touchStartX - threshold) {
-      window.goToSlide(currentSlide + 1);
-    } else if (touchEndX > touchStartX + threshold) {
-      window.goToSlide(currentSlide - 1);
-    }
-
-    restartAutoplay();
-  }, { passive: true });
-
-  document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) restartAutoplay();
-  });
-
-  restartAutoplay();
 }
 
 // ============================================================
@@ -4520,7 +4460,7 @@ function initSectionReveal() {
   if (prefersReducedMotion() || !('IntersectionObserver' in window)) return;
 
   const targets = document.querySelectorAll(
-    '.trust-strip, .slider-container, .about-section, .about-cta'
+    '.trust-strip, .about-section, .about-cta'
   );
   if (!targets.length) return;
 
@@ -4556,7 +4496,6 @@ document.addEventListener('DOMContentLoaded', () => {
   initTelegram();
   initTelegramBanner();
   initPwa();
-  initSlider();
   initSearchMotion();
   initCardSpotlight();
   initSectionReveal();

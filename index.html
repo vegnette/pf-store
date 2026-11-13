@@ -135,7 +135,7 @@
           <span class="trust-card-sub">Обмен или возврат</span>
         </span>
       </div>
-      <div class="trust-card">
+      <button type="button" class="trust-card trust-card--action" onclick="openInfoModal('delivery')">
         <span class="trust-card-icon" aria-hidden="true">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="4" width="14" height="12"></rect><polygon points="15 8 19 8 22 11 22 16 15 16 15 8"></polygon><circle cx="5.5" cy="18.5" r="1.8"></circle><circle cx="18" cy="18.5" r="1.8"></circle></svg>
         </span>
@@ -143,7 +143,7 @@
           <span class="trust-card-title">Доставка по РФ</span>
           <span class="trust-card-sub">СДЭК, Почта, Boxberry</span>
         </span>
-      </div>
+      </button>
       <div class="trust-card">
         <span class="trust-card-icon" aria-hidden="true">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 12-9 12s-9-5-9-12a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="2.6"></circle></svg>
@@ -152,43 +152,6 @@
           <span class="trust-card-title" id="pickupTodayText">Самовывоз сегодня</span>
           <span class="trust-card-sub">Барнаул, Павловский тракт, 307к3</span>
         </span>
-      </div>
-    </div>
-
-    <div class="slider-container">
-      <div class="slider-track" id="sliderTrack">
-        <div class="slide" onclick="openInfoModal('delivery')">
-          <div class="slide-icon">
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"></rect><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon><circle cx="5.5" cy="18.5" r="2.5"></circle><circle cx="18.5" cy="18.5" r="2.5"></circle></svg>
-          </div>
-          <div class="slide-content">
-            <h3>Быстрая доставка по РФ</h3>
-            <p>Отправка в день заказа (СДЭК, Почта, Boxberry)</p>
-          </div>
-        </div>
-        <div class="slide" onclick="openInfoModal('promo')">
-          <div class="slide-icon">
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path><line x1="4" y1="22" x2="4" y2="15"></line></svg>
-          </div>
-          <div class="slide-content">
-            <h3>Скидка 5% на первый заказ</h3>
-            <p>Промокод: START</p>
-          </div>
-        </div>
-        <div class="slide" onclick="openInfoModal('gifts')">
-          <div class="slide-icon">
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 12 20 22 4 22 4 12"></polyline><rect x="2" y="7" width="20" height="5"></rect><line x1="12" y1="22" x2="12" y2="7"></line><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"></path><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"></path></svg>
-          </div>
-          <div class="slide-content">
-            <h3>Подарки к покупкам</h3>
-            <p>Кабель 60W в подарок к наушникам</p>
-          </div>
-        </div>
-      </div>
-      <div class="slider-dots" id="sliderDots">
-        <div class="dot active" onclick="goToSlide(0)"></div>
-        <div class="dot" onclick="goToSlide(1)"></div>
-        <div class="dot" onclick="goToSlide(2)"></div>
       </div>
     </div>
 
