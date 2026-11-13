@@ -114,44 +114,17 @@
         <span class="store-status-title" id="storeStatusText">ПРОВЕРЯЕМ ГРАФИК</span>
         <span class="store-status-sub" id="storeStatusSub">Заказать можно в любое время</span>
       </span>
+      <button type="button" class="store-status-action" id="storeStatusAction">ОСТАВИТЬ ЗАКАЗ</button>
     </div>
 
-    <div class="trust-strip" aria-label="Гарантии магазина">
-      <div class="trust-card">
-        <span class="trust-card-icon" aria-hidden="true">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-        </span>
-        <span class="trust-card-body">
-          <span class="trust-card-title">Проверка при получении</span>
-          <span class="trust-card-sub">Смотрите товар до оплаты</span>
-        </span>
-      </div>
-      <div class="trust-card">
-        <span class="trust-card-icon" aria-hidden="true">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
-        </span>
-        <span class="trust-card-body">
-          <span class="trust-card-title">Гарантия 14 дней</span>
-          <span class="trust-card-sub">Обмен или возврат</span>
-        </span>
-      </div>
-      <button type="button" class="trust-card trust-card--action" onclick="openInfoModal('delivery')">
-        <span class="trust-card-icon" aria-hidden="true">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="4" width="14" height="12"></rect><polygon points="15 8 19 8 22 11 22 16 15 16 15 8"></polygon><circle cx="5.5" cy="18.5" r="1.8"></circle><circle cx="18" cy="18.5" r="1.8"></circle></svg>
-        </span>
-        <span class="trust-card-body">
-          <span class="trust-card-title">Доставка по РФ</span>
-          <span class="trust-card-sub">СДЭК, Почта, Boxberry</span>
-        </span>
-      </button>
-      <div class="trust-card">
-        <span class="trust-card-icon" aria-hidden="true">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 12-9 12s-9-5-9-12a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="2.6"></circle></svg>
-        </span>
-        <span class="trust-card-body">
-          <span class="trust-card-title" id="pickupTodayText">Самовывоз сегодня</span>
-          <span class="trust-card-sub">Барнаул, Павловский тракт, 307к3</span>
-        </span>
+    <div class="trust-marquee" aria-label="Гарантии магазина">
+      <div class="trust-marquee-track">
+        <div class="trust-marquee-group">
+          <span class="trust-marquee-item"><span class="trust-check" aria-hidden="true">✓</span> Проверка при получении</span>
+          <span class="trust-marquee-item"><span class="trust-check" aria-hidden="true">✓</span> Гарантия 14 дней</span>
+          <span class="trust-marquee-item"><span class="trust-check" aria-hidden="true">✓</span> Доставка по РФ · СДЭК, Почта, Boxberry</span>
+          <span class="trust-marquee-item"><span class="trust-check" aria-hidden="true">✓</span> Самовывоз сегодня / с 10:00 · Барнаул, Павловский тракт, 307к3</span>
+        </div>
       </div>
     </div>
 
@@ -416,6 +389,7 @@
       <p class="profile-username" id="profileUsername" hidden></p>
       <p class="profile-subtitle" id="profileSubtitle">Покупатель PF Store</p>
       <p class="profile-telegram-line" id="profileTelegramLine" role="button" tabindex="0">Проверяем подключение Telegram…</p>
+      <p class="profile-telegram-hint" id="profileTelegramHint">Статусы заказов, история покупок и уведомления о поступлении — в Telegram-боте</p>
       <span class="profile-role" id="profileRole" hidden>РЕЖИМ МЕНЕДЖЕРА</span>
     </div>
     <div class="profile-section">
@@ -543,8 +517,8 @@
         </div>
         <div id="productStock" class="product-stock-status"></div>
         <div class="product-gift" id="productGift" hidden></div>
-        <div class="product-actions" style="margin-bottom: 12px; margin-top: 16px;">
-          <button class="btn-primary" id="addToCart" style="width: 100%;">В КОРЗИНУ</button>
+        <div class="product-actions">
+          <button class="btn-primary" id="addToCart">В КОРЗИНУ</button>
         </div>
         <button class="btn-stock-notify" id="stockNotifyBtn" type="button" hidden>СООБЩИТЬ О ПОСТУПЛЕНИИ</button>
         <div class="stock-editor" id="stockEditor" hidden>
@@ -556,13 +530,26 @@
           </div>
           <div class="stock-editor-hint" id="stockEditorHint">Когда наличие станет больше нуля, подписчики получат сообщение.</div>
         </div>
+        <button class="btn-manager" id="askManagerBtn">УТОЧНИТЬ У МЕНЕДЖЕРА</button>
+        <div class="product-trust">✓ Гарантия 14 дней&nbsp;&nbsp;·&nbsp;&nbsp;✓ Проверка перед покупкой&nbsp;&nbsp;·&nbsp;&nbsp;✓ Доставка по городу</div>
+        <div class="product-replica">
+          <div class="product-replica-title">Что такое реплика 1:1</div>
+          <p>Точная копия оригинала по размеру, материалам и функциям. Каждый товар проверяем при вас: включаете, слушаете и тестируете до оплаты. Гарантия 14 дней — обмен или возврат.</p>
+        </div>
         <p class="product-desc" id="productDesc">Загрузка описания...</p>
         <div class="similar-block" id="similarBlock" hidden>
           <div class="similar-title">Похожие товары</div>
           <div class="similar-list" id="similarList"></div>
         </div>
-        <button class="btn-manager" id="askManagerBtn" style="margin-top: 24px;">УТОЧНИТЬ У МЕНЕДЖЕРА</button>
-        <div class="product-trust">✓ Гарантия 14 дней&nbsp;&nbsp;·&nbsp;&nbsp;✓ Проверка перед покупкой&nbsp;&nbsp;·&nbsp;&nbsp;✓ Бесплатная доставка по городу</div>
+      </div>
+
+      <!-- Закреплённая панель: цена и покупка всегда под рукой -->
+      <div class="product-buybar" id="productBuyBar">
+        <div class="buybar-price">
+          <span class="buybar-current" id="buyBarPrice"></span>
+          <span class="buybar-old" id="buyBarOldPrice"></span>
+        </div>
+        <button type="button" class="buybar-btn" id="buyBarAdd">В КОРЗИНУ</button>
       </div>
     </div>
   </div>
@@ -642,7 +629,7 @@
 
         <label class="checkout-field">
           <span class="checkout-label">ТЕЛЕФОН</span>
-          <input id="checkoutPhone" name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="20" placeholder="+7 999 000-00-00" required>
+          <input id="checkoutPhone" name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="18" placeholder="+7 (999) 000-00-00" required>
         </label>
 
         <fieldset class="checkout-delivery">

@@ -1530,6 +1530,8 @@ function detectManager(user) {
 function setTelegramStatus(state) {
   const el = document.getElementById('profileTelegramLine');
   if (!el) return;
+  const hint = document.getElementById('profileTelegramHint');
+  if (hint) hint.hidden = state === 'connected';
 
   el.classList.remove('connected', 'error');
 
@@ -2468,11 +2470,6 @@ function updateStoreStatus() {
     }
   }
 
-  const todayText = document.getElementById('pickupTodayText');
-  if (todayText) {
-    todayText.textContent = open ? 'Самовывоз сегодня' : `Самовывоз с ${STORE_OPEN_HOUR}:00`;
-  }
-
   const nowEl = document.getElementById('pickupNow');
   if (nowEl) {
     const time = formatStoreTime();
@@ -2647,12 +2644,11 @@ function buildProductCard(product, options = {}) {
           ${product.oldPrice && product.oldPrice > product.price ? `<span class="card-old-price">${formatPrice(product.oldPrice)}</span>` : ''}
         </div>
         ${stockHtml}
-        ${giftShort ? `<span class="card-gift" title="${escapeHtml(giftShort)}">🎁 ${escapeHtml(giftShort)}</span>` : ''}
+        ${giftShort
+          ? `<span class="card-gift" title="${escapeHtml(giftShort)}">🎁 ${escapeHtml(giftShort)}</span>`
+          : '<span class="card-gift card-gift--placeholder" aria-hidden="true"></span>'}
         <button class="card-btn" data-add="${product.id}">
           ${isOutOfStock ? 'ПОД ЗАКАЗ' : 'В КОРЗИНУ'}
-        </button>
-        <button type="button" class="card-manager-btn" data-manager="${product.id}">
-          НАПИСАТЬ МЕНЕДЖЕРУ
         </button>
       </div>
     </div>`;
@@ -2922,6 +2918,25 @@ function openProduct(id) {
     };
   }
 
+  // Закреплённая панель покупки
+  const buyBarPrice = document.getElementById('buyBarPrice');
+  const buyBarOldPrice = document.getElementById('buyBarOldPrice');
+  const buyBarAdd = document.getElementById('buyBarAdd');
+  if (buyBarPrice) buyBarPrice.textContent = formatPrice(product.price);
+  if (buyBarOldPrice) {
+    buyBarOldPrice.textContent = product.oldPrice && product.oldPrice > product.price
+      ? formatPrice(product.oldPrice)
+      : '';
+    buyBarOldPrice.hidden = !buyBarOldPrice.textContent;
+  }
+  if (buyBarAdd) {
+    const outOfStock = (Number(product.stock) || 0) <= 0;
+    buyBarAdd.textContent = outOfStock ? 'ПОД ЗАКАЗ' : 'В КОРЗИНУ';
+    buyBarAdd.onclick = () => {
+      if (addToCart(product.id)) closeModal(modal);
+    };
+  }
+
   const stockNotifyBtn = document.getElementById('stockNotifyBtn');
   if (stockNotifyBtn) stockNotifyBtn.onclick = () => openStockNotify(product);
 
@@ -2959,6 +2974,7 @@ function openProduct(id) {
   requestAnimationFrame(() => {
     if (scroller) scroller.scrollTop = 0;
     gallery.scrollLeft = 0;
+    window.updateProductBuyBar?.();
   });
 }
 
@@ -3441,6 +3457,23 @@ function showCheckoutError(message, field) {
   playSound('error');
 }
 
+function formatPhoneInput(value) {
+  let digits = String(value || '').replace(/\D/g, '');
+  if (!digits) return '';
+  if (digits[0] === '8') digits = `7${digits.slice(1)}`;
+  if (digits[0] !== '7') digits = `7${digits}`;
+  digits = digits.slice(0, 11);
+
+  const rest = digits.slice(1);
+  let result = '+7';
+  if (rest.length) result += ` (${rest.slice(0, 3)}`;
+  if (rest.length >= 3) result += ')';
+  if (rest.length > 3) result += ` ${rest.slice(3, 6)}`;
+  if (rest.length > 6) result += `-${rest.slice(6, 8)}`;
+  if (rest.length > 8) result += `-${rest.slice(8, 10)}`;
+  return result;
+}
+
 function prefillCheckoutForm() {
   const saved = getCheckoutCustomer();
   const name = document.getElementById('checkoutName');
@@ -3449,7 +3482,7 @@ function prefillCheckoutForm() {
   const comment = document.getElementById('checkoutComment');
 
   if (name && !name.value) name.value = saved.name || currentUser?.first_name || '';
-  if (phone && !phone.value) phone.value = saved.phone || '';
+  if (phone && !phone.value) phone.value = formatPhoneInput(saved.phone || '');
   if (address && !address.value) address.value = saved.address || '';
   if (comment) comment.value = '';
 
@@ -3969,6 +4002,21 @@ function bindEvents() {
   document.getElementById('navFavoritesTab')?.addEventListener('click', openFavorites);
   document.getElementById('navCartTab')?.addEventListener('click', openCart);
 
+  // Статус магазина: заказ можно оставить в любое время
+  document.getElementById('storeStatusAction')?.addEventListener('click', () => {
+    if (cart.length) {
+      openCart();
+      return;
+    }
+
+    const text = isStoreOpen()
+      ? 'Здравствуйте! Хочу оставить заказ. Подскажите, что есть в наличии.'
+      : `Здравствуйте! Хочу оставить заказ. Магазин закрыт — прошу принять его в работу с ${STORE_OPEN_HOUR}:00.`;
+    openTelegramLink(`https://t.me/${TELEGRAM_USERNAME}?text=${encodeURIComponent(text)}`);
+    playSound('tap');
+    triggerHaptic('selection');
+  });
+
   // Профиль
   document.getElementById('myPromoBtn')?.addEventListener('click', () => openInfoModal('promo'));
 
@@ -4135,6 +4183,23 @@ function bindEvents() {
   document.getElementById('closeInfo')?.addEventListener('click', () => closeModal('infoModal'));
   document.getElementById('closeFilter')?.addEventListener('click', () => closeModal('filterModal'));
 
+  // Панель покупки: прячем, когда основная кнопка уже видна
+  const buyBarEl = document.getElementById('productBuyBar');
+  const productScroller = document.querySelector('.product-modal');
+  const mainAddBtn = document.getElementById('addToCart');
+  if (buyBarEl && productScroller && mainAddBtn) {
+    const updateBuyBar = () => {
+      if (document.getElementById('productModal')?.classList.contains('active') === false) return;
+      const barHeight = buyBarEl.offsetHeight || 68;
+      const rect = mainAddBtn.getBoundingClientRect();
+      const ctaVisible = rect.top > 0 && rect.bottom < window.innerHeight - barHeight;
+      buyBarEl.classList.toggle('is-hidden', ctaVisible);
+    };
+    productScroller.addEventListener('scroll', updateBuyBar, { passive: true });
+    window.addEventListener('resize', updateBuyBar);
+    window.updateProductBuyBar = updateBuyBar;
+  }
+
   // Клик по фону модалки
   document.querySelectorAll('.modal').forEach(modal => {
     modal.addEventListener('click', event => {
@@ -4148,6 +4213,20 @@ function bindEvents() {
   // Оформление заказа
   document.getElementById('checkoutBtn')?.addEventListener('click', openCheckout);
   document.getElementById('checkoutForm')?.addEventListener('submit', submitCheckout);
+
+  // Маска телефона: +7 (999) 000-00-00
+  const phoneInput = document.getElementById('checkoutPhone');
+  phoneInput?.addEventListener('input', event => {
+    const input = event.target;
+    const formatted = formatPhoneInput(input.value);
+    if (input.value === formatted) return;
+    input.value = formatted;
+    input.setSelectionRange(formatted.length, formatted.length);
+  });
+  phoneInput?.addEventListener('blur', () => {
+    if (phoneInput.value.replace(/\D/g, '').length <= 1) phoneInput.value = '';
+  });
+
   document.getElementById('closeCheckout')?.addEventListener('click', () => closeModal('checkoutModal'));
   document.querySelectorAll('input[name="delivery"]').forEach(radio => {
     radio.addEventListener('change', () => {
@@ -4260,13 +4339,6 @@ function bindEvents() {
     const favButton = event.target.closest('.card-fav');
     if (favButton) {
       toggleFavorite(Number(favButton.dataset.fav));
-      return;
-    }
-
-    const managerButton = event.target.closest('.card-manager-btn');
-    if (managerButton) {
-      const product = products.find(item => Number(item.id) === Number(managerButton.dataset.manager));
-      if (product) openManagerChat(product);
       return;
     }
 
@@ -4460,7 +4532,7 @@ function initSectionReveal() {
   if (prefersReducedMotion() || !('IntersectionObserver' in window)) return;
 
   const targets = document.querySelectorAll(
-    '.trust-strip, .about-section, .about-cta'
+    '.trust-marquee, .about-section, .about-cta'
   );
   if (!targets.length) return;
 
@@ -4490,6 +4562,18 @@ function pulseAddButton(button, isOrder = false) {
   }, 1500);
 }
 
+// Бегущая строка гарантий: дублируем ленту для бесшовной прокрутки
+function initTrustMarquee() {
+  const track = document.querySelector('.trust-marquee-track');
+  const group = track?.querySelector('.trust-marquee-group');
+  if (!track || !group || track.children.length > 1) return;
+
+  const clone = group.cloneNode(true);
+  clone.setAttribute('aria-hidden', 'true');
+  clone.querySelectorAll('[id]').forEach(el => el.removeAttribute('id'));
+  track.appendChild(clone);
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   updateGreeting(null);
   updateSoundToggle();
@@ -4497,6 +4581,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initTelegramBanner();
   initPwa();
   initSearchMotion();
+  initTrustMarquee();
   initCardSpotlight();
   initSectionReveal();
   bindEvents();
