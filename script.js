@@ -2403,6 +2403,7 @@ async function loadProducts() {
     catalog.style.display = 'grid';
 
     renderCatalog();
+    renderAboutCategories();
     renderRecent();
     renderResumeBanner();
     updateCategoryVisibility();
@@ -2597,6 +2598,7 @@ function buildProductCard(product, options = {}) {
   const active = isFavorite(product.id);
   const safeTitle = escapeHtml(product.title);
   const priceDrop = Number(options.priceDrop) || 0;
+  const showAdd = options.showAdd !== false;
   const giftShort = product.gift_short
     ? String(product.gift_short).trim()
     : (product.gift_desc ? String(product.gift_desc).replace('🎁', '').trim() : '');
@@ -2647,9 +2649,11 @@ function buildProductCard(product, options = {}) {
         ${giftShort
           ? `<span class="card-gift" title="${escapeHtml(giftShort)}">🎁 ${escapeHtml(giftShort)}</span>`
           : '<span class="card-gift card-gift--placeholder" aria-hidden="true"></span>'}
-        <button class="card-btn" data-add="${product.id}">
-          ${isOutOfStock ? 'ПОД ЗАКАЗ' : 'В КОРЗИНУ'}
-        </button>
+        ${showAdd
+          ? `<button class="card-btn" data-add="${product.id}">
+               ${isOutOfStock ? 'ПОД ЗАКАЗ' : 'В КОРЗИНУ'}
+             </button>`
+          : `<span class="card-view-hint">Смотреть <span aria-hidden="true">→</span></span>`}
       </div>
     </div>`;
 }
@@ -2665,8 +2669,19 @@ function renderCatalog() {
     return;
   }
 
-  catalog.innerHTML = filtered.map(product => buildProductCard(product)).join('');
+  catalog.innerHTML = filtered.map(product => buildProductCard(product, { showAdd: false })).join('');
   animateCatalogCards();
+}
+
+// «О нас»: живые счётчики категорий вместо статичных подписей
+function renderAboutCategories() {
+  document.querySelectorAll('[data-about-count]').forEach(el => {
+    const key = el.dataset.aboutCount;
+    const count = products.filter(product => product.category === key).length;
+    el.textContent = count
+      ? `${count} ${plural(count, 'товар', 'товара', 'товаров')}`
+      : 'пока нет';
+  });
 }
 
 // Пустой результат — не тупик: менеджер, сброс и ближайшие товары
@@ -4001,6 +4016,18 @@ function bindEvents() {
   document.getElementById('navProfileTab')?.addEventListener('click', () => setView('profile'));
   document.getElementById('navFavoritesTab')?.addEventListener('click', openFavorites);
   document.getElementById('navCartTab')?.addEventListener('click', openCart);
+
+  // «О нас» → категория в каталоге
+  document.querySelectorAll('[data-about-cat]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const category = btn.dataset.aboutCat;
+      if (!category) return;
+      setView('home');
+      currentCategory = 'all';
+      selectCategory(category);
+      document.getElementById('catalog')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  });
 
   // Статус магазина: заказ можно оставить в любое время
   document.getElementById('storeStatusAction')?.addEventListener('click', () => {

@@ -318,6 +318,25 @@ button { touch-action: manipulation; }
 
 .card-btn { width: 100%; margin-top: auto; background: var(--accent); border: none; color: #000; padding: 10px; border-radius: var(--radius); cursor: pointer; font-weight: 800; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; transition: all 0.2s; position: relative; z-index: 2; min-height: 38px; }
 .card-btn:active { filter: brightness(0.9); }
+.card-view-hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 38px;
+  margin-top: auto;
+  padding-top: 9px;
+  border-top: 1px solid var(--border);
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  transition: color 0.2s;
+}
+.card-view-hint span { color: var(--accent); }
+.card:hover .card-view-hint { color: var(--text); }
 
 .card-gift {
   display: inline-flex;
@@ -503,6 +522,53 @@ button { touch-action: manipulation; }
 .about-trust-card svg { color: var(--accent); margin-bottom: 10px; }
 .about-trust-title { font-size: 12px; font-weight: 800; margin-bottom: 6px; text-transform: uppercase; line-height: 1.25; }
 .about-trust-text { font-size: 11px; color: var(--text-2); line-height: 1.5; }
+
+.about-section-sub { margin: -6px 0 14px; font-size: 11px; color: var(--text-3); line-height: 1.5; }
+
+.about-story { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 16px; }
+.about-story p { font-size: 12px; color: var(--text-2); line-height: 1.65; }
+.about-story p + p { margin-top: 10px; }
+.about-principles { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
+.about-principle { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 999px; background: rgba(109, 223, 200, 0.07); border: 1px solid rgba(109, 223, 200, 0.22); color: var(--text); font-size: 10px; font-weight: 600; letter-spacing: 0.2px; }
+.about-principle b { color: var(--accent); font-size: 9px; font-weight: 800; }
+
+.about-cats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.about-cat { position: relative; display: flex; flex-direction: column; align-items: flex-start; padding: 14px; background: linear-gradient(145deg, var(--surface-2), var(--bg)); border: 1px solid var(--border); border-radius: var(--radius-lg); color: var(--text); text-align: left; cursor: pointer; transition: border-color 0.2s, transform 0.2s; }
+.about-cat::after { content: '→'; position: absolute; top: 14px; right: 14px; color: var(--text-3); font-size: 14px; line-height: 1; transition: color 0.2s, transform 0.2s; }
+.about-cat:hover::after { color: var(--accent); transform: translateX(2px); }
+.about-cat:active { transform: scale(0.98); border-color: var(--accent); }
+.about-cat-icon { font-size: 18px; line-height: 1; margin-bottom: 8px; }
+.about-cat-name { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.3px; }
+.about-cat-count { margin-top: 3px; font-size: 10px; color: var(--text-3); }
+
+.about-ship-list { display: flex; flex-direction: column; gap: 8px; }
+.about-ship-item { display: flex; align-items: flex-start; gap: 12px; padding: 13px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+.about-ship-badge { flex: 0 0 auto; min-width: 62px; padding: 4px 8px; text-align: center; border-radius: 6px; background: rgba(109, 223, 200, 0.1); border: 1px solid rgba(109, 223, 200, 0.28); color: var(--accent); font-size: 10px; font-weight: 800; letter-spacing: 0.3px; }
+.about-ship-title { font-size: 12px; font-weight: 700; margin-bottom: 3px; }
+.about-ship-text { font-size: 11px; color: var(--text-2); line-height: 1.5; }
+.about-note { margin-top: 10px; font-size: 10px; color: var(--text-3); line-height: 1.5; }
+
+.about-warranty { background: var(--surface-2); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: var(--radius-lg); padding: 16px; }
+.about-warranty-head { display: flex; align-items: center; gap: 14px; }
+.about-warranty-days { flex: 0 0 auto; font-size: 32px; font-weight: 900; color: var(--accent); line-height: 1; }
+.about-warranty-title { font-size: 12px; font-weight: 800; text-transform: uppercase; margin-bottom: 4px; letter-spacing: 0.3px; }
+.about-warranty-text { font-size: 11px; color: var(--text-2); line-height: 1.5; }
+.about-warranty-steps { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--border); }
+.about-warranty-step { display: flex; align-items: center; gap: 10px; font-size: 11px; color: var(--text-2); line-height: 1.4; }
+.about-warranty-step span { flex: 0 0 20px; width: 20px; height: 20px; border-radius: 50%; background: rgba(109, 223, 200, 0.1); color: var(--accent); font-size: 9px; font-weight: 800; display: flex; align-items: center; justify-content: center; }
+
+.about-replica { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 16px; }
+.about-replica p { font-size: 12px; color: var(--text-2); line-height: 1.65; }
+.about-replica-list { list-style: none; display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.about-replica-list li { position: relative; padding-left: 20px; font-size: 11px; color: var(--text-2); line-height: 1.5; }
+.about-replica-list li::before { content: '✓'; position: absolute; left: 0; top: 0; color: var(--accent); font-size: 11px; font-weight: 800; }
+
+.about-bot { background: linear-gradient(135deg, rgba(109, 223, 200, 0.12), rgba(109, 223, 200, 0.03)); border: 1px solid rgba(109, 223, 200, 0.3); border-radius: var(--radius-lg); padding: 16px; }
+.about-bot-top { display: flex; align-items: flex-start; gap: 12px; }
+.about-bot-icon { flex: 0 0 34px; width: 34px; height: 34px; border-radius: 50%; background: rgba(109, 223, 200, 0.14); color: var(--accent); display: flex; align-items: center; justify-content: center; }
+.about-bot-title { font-size: 13px; font-weight: 800; margin-bottom: 4px; }
+.about-bot-text { font-size: 11px; color: var(--text-2); line-height: 1.5; }
+.about-bot-btn { display: flex; align-items: center; justify-content: center; width: 100%; margin-top: 12px; padding: 11px; border-radius: var(--radius); background: var(--accent); color: #000; text-decoration: none; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; }
 
 .about-pickup { display: flex; align-items: flex-start; gap: 14px; background: var(--surface-2); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: var(--radius-lg); padding: 16px; }
 .about-pickup-icon { width: 44px; height: 44px; border-radius: 50%; background: rgba(109, 223, 200, 0.1); display: flex; align-items: center; justify-content: center; color: var(--accent); flex-shrink: 0; }
