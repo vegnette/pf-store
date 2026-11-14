@@ -37,6 +37,11 @@ const CATEGORY_LABELS = {
 const NO_PHOTO = './images/no-photo.svg';
 const SORT_MODES = ['popular', 'price-asc', 'price-desc', 'discount', 'new'];
 
+// Реферальная программа: 10% с покупки друга
+const REFERRAL_PERCENT = 10;
+const REFERRAL_STORAGE_KEY = 'pf_ref';
+const REFERRAL_TTL = 90 * 24 * 60 * 60 * 1000;
+
 // Напоминание о незавершённом заказе
 const CART_SNAPSHOT_KEY = 'pf_cart_snapshot';
 const CART_NUDGE_KEY = 'pf_cart_nudge_dismissed';
@@ -78,6 +83,7 @@ let appliedPromoPercent = Number(localStorage.getItem('pf_promo_applied') || 0);
 let orders = [];
 let isManager = false;
 let ordersLoading = false;
+let referralData = null;
 
 // --- МОДАЛЬНЫЕ ОКНА ---
 const modalStack = [];
@@ -1589,6 +1595,8 @@ function applyTelegramUser(user) {
   applyManagerUI();
   setTelegramStatus('connected');
   updateOrderBadge();
+  captureReferral();
+  renderReferral();
   return true;
 }
 
@@ -1639,6 +1647,188 @@ function initTelegram() {
   }
 
   initBackButton();
+}
+
+// ============================================================
+// РЕФЕРАЛЬНАЯ ПРОГРАММА
+// ============================================================
+
+function normalizeReferralId(value) {
+  const digits = String(value ?? '').trim().replace(/^ref[_-]?/i, '');
+  return /^\d{5,20}$/.test(digits) ? digits : '';
+}
+
+function readReferralFromStartParam() {
+  const startParam = ensureTelegramApp()?.initDataUnsafe?.start_param;
+  return normalizeReferralId(startParam);
+}
+
+function captureReferral() {
+  let code = '';
+  try {
+    const params = new URLSearchParams(location.search);
+    code = normalizeReferralId(params.get('ref') || params.get('startapp') || '');
+  } catch (error) {
+    // некорректный адрес — не мешаем загрузке
+  }
+
+  if (!code) code = readReferralFromStartParam();
+  if (!code) return;
+
+  try {
+    localStorage.setItem(REFERRAL_STORAGE_KEY, JSON.stringify({ id: code, at: Date.now() }));
+  } catch (error) {
+    // без localStorage ссылка просто не сохранится
+  }
+}
+
+function getStoredReferrerId() {
+  try {
+    const raw = localStorage.getItem(REFERRAL_STORAGE_KEY);
+    if (!raw) return '';
+    const parsed = JSON.parse(raw);
+    if (!parsed || !parsed.id || !parsed.at) return '';
+    if (Date.now() - Number(parsed.at) > REFERRAL_TTL) return '';
+    return normalizeReferralId(parsed.id);
+  } catch (error) {
+    return '';
+  }
+}
+
+function getReferralLink() {
+  const id = currentUser?.id;
+  if (!id) return '';
+
+  if (TELEGRAM_BOT_USERNAME) {
+    return `https://t.me/${TELEGRAM_BOT_USERNAME}?startapp=ref_${id}`;
+  }
+
+  return `${location.origin}${location.pathname}?ref=${id}`;
+}
+
+function applyReferralData(data) {
+  const number = value => Math.max(0, Math.round(Number(value) || 0));
+  referralData = {
+    invited: Math.max(0, Number(data?.invited) || 0),
+    orders: Math.max(0, Number(data?.orders) || 0),
+    earned: number(data?.earned),
+    available: number(data?.available),
+    paid: number(data?.paid)
+  };
+  renderReferral();
+}
+
+function renderReferral() {
+  const card = document.getElementById('referralCard');
+  if (!card) return;
+
+  const link = getReferralLink();
+  const available = Number(referralData?.available) || 0;
+  const invited = Number(referralData?.invited) || 0;
+  const earned = Number(referralData?.earned) || 0;
+
+  const input = document.getElementById('refLinkInput');
+  if (input) {
+    input.value = link || 'Откройте сайт через Telegram';
+    input.disabled = !link;
+  }
+
+  const invitedEl = document.getElementById('refInvited');
+  if (invitedEl) invitedEl.textContent = String(invited);
+
+  const availableEl = document.getElementById('refAvailable');
+  if (availableEl) availableEl.textContent = formatPrice(available);
+
+  const earnedEl = document.getElementById('refEarned');
+  if (earnedEl) earnedEl.textContent = formatPrice(earned);
+
+  const copyBtn = document.getElementById('refCopyBtn');
+  if (copyBtn) copyBtn.disabled = !link;
+
+  const shareBtn = document.getElementById('refShareBtn');
+  if (shareBtn) shareBtn.disabled = !link;
+
+  const payoutBtn = document.getElementById('refPayoutBtn');
+  if (payoutBtn) payoutBtn.hidden = !link || available <= 0;
+
+  const guestNote = document.getElementById('refGuestNote');
+  if (guestNote) guestNote.hidden = Boolean(link);
+}
+
+function openReferral() {
+  setView('profile');
+  window.setTimeout(() => {
+    document.getElementById('referralCard')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, 80);
+}
+
+function copyReferralLink() {
+  const link = getReferralLink();
+  if (!link) {
+    showToast('Откройте сайт через Telegram, чтобы получить ссылку', 'error');
+    return;
+  }
+
+  const done = () => {
+    showToast('Ссылка скопирована', 'success');
+    playSound('success');
+    triggerHaptic('success');
+  };
+
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(link).then(done).catch(() => fallbackCopyReferral(link, done));
+    return;
+  }
+
+  fallbackCopyReferral(link, done);
+}
+
+function fallbackCopyReferral(link, done) {
+  try {
+    const area = document.createElement('textarea');
+    area.value = link;
+    area.setAttribute('readonly', '');
+    area.style.position = 'fixed';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    area.select();
+    document.execCommand('copy');
+    document.body.removeChild(area);
+    done();
+  } catch (error) {
+    showToast('Не удалось скопировать ссылку', 'error');
+  }
+}
+
+function shareReferral() {
+  const link = getReferralLink();
+  if (!link) {
+    showToast('Откройте сайт через Telegram, чтобы поделиться ссылкой', 'error');
+    return;
+  }
+
+  const text = 'PF Store — электроника с проверкой перед покупкой. Загляни в каталог:';
+  const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(text)}`;
+  const app = ensureTelegramApp();
+
+  if (app?.openTelegramLink) app.openTelegramLink(shareUrl);
+  else window.open(shareUrl, '_blank', 'noopener');
+
+  playSound('tap');
+  triggerHaptic('selection');
+}
+
+function requestReferralPayout() {
+  const balance = Number(referralData?.available) || 0;
+  const text = [
+    'Здравствуйте! Хочу получить реферальное вознаграждение.',
+    balance > 0 ? `Доступный баланс: ${formatPrice(balance)}.` : '',
+    currentUser?.id ? `Мой Telegram ID: ${currentUser.id}.` : ''
+  ].filter(Boolean).join(' ');
+
+  openTelegramLink(`https://t.me/${TELEGRAM_USERNAME}?text=${encodeURIComponent(text)}`);
+  playSound('tap');
+  triggerHaptic('selection');
 }
 
 // ============================================================
@@ -1699,6 +1889,9 @@ function formatOrderDate(value) {
 
 function createOrderRecord(totals, items, customer = null) {
   const now = new Date();
+  const referrerId = getStoredReferrerId();
+  const referralId = referrerId && String(referrerId) !== String(currentUser?.id || '') ? referrerId : '';
+
   return {
     id: `PF-${now.getTime().toString(36).toUpperCase().slice(-5)}`,
     createdAt: now.toISOString(),
@@ -1731,7 +1924,8 @@ function createOrderRecord(totals, items, customer = null) {
       id: currentUser.id ?? null,
       username: currentUser.username || '',
       first_name: currentUser.first_name || ''
-    } : null
+    } : null,
+    referral: referralId ? { referrerId: referralId, percent: REFERRAL_PERCENT } : null
   };
 }
 
@@ -1851,6 +2045,8 @@ async function loadOrdersFromServer() {
     if (!response.ok) return;
 
     const data = await response.json();
+    if (data?.referral) applyReferralData(data.referral);
+
     const remote = Array.isArray(data?.orders) ? data.orders : [];
     if (!remote.length) return;
 
@@ -1945,6 +2141,10 @@ function renderOrderActions(order) {
 
   if (isManager && isTestOrder(order)) {
     actions.push(btn('delete', 'Удалить тестовый'));
+  }
+
+  if (isManager && order.referral?.credited && !order.referral?.paid) {
+    actions.push(btn('referral-pay', 'Выплатить реферал'));
   }
 
   return actions.length ? `<div class="order-actions">${actions.join('')}</div>` : '';
@@ -2042,6 +2242,15 @@ function renderOrders() {
       ? [order.user.first_name, order.user.username ? `@${order.user.username}` : ''].filter(Boolean).join(' · ')
       : '';
 
+    const referral = isManager && order.referral
+      ? (() => {
+          const percent = Number(order.referral.percent) || REFERRAL_PERCENT;
+          const reward = Number(order.referral.reward) || Math.round((Number(order.total) || 0) * percent / 100);
+          const state = order.referral.paid ? 'выплачено' : (order.referral.credited ? 'начислено' : 'после получения');
+          return `<div class="order-referral">🎁 Реферал: ID ${escapeHtml(order.referral.referrerId)} · ${percent}% = ${formatPrice(reward)} · ${state}</div>`;
+        })()
+      : '';
+
     return `
       <article class="order-card">
         <div class="order-card-head">
@@ -2070,6 +2279,7 @@ function renderOrders() {
         <div class="order-total-row"><span>Итого</span><strong>${formatPrice(order.total)}</strong></div>
         ${renderOrderDelivery(order)}
         ${buyer ? `<div class="order-buyer">Покупатель: ${escapeHtml(buyer)}</div>` : ''}
+        ${referral}
         ${renderOrderActions(order)}
       </article>`;
   }).join('') + `
@@ -2170,6 +2380,17 @@ function setOrderStatus(orderId, status) {
   if (nextStatus === 'received') {
     if (!order.deliveredAt) order.deliveredAt = now;
     if (!order.receivedAt) order.receivedAt = now;
+
+    // Сразу показываем менеджеру начисление, сервер подтвердит при синхронизации.
+    if (order.referral && !order.referral.credited) {
+      const percent = Number(order.referral.percent) || REFERRAL_PERCENT;
+      order.referral = {
+        ...order.referral,
+        reward: Math.round((Number(order.total) || 0) * percent / 100),
+        credited: true,
+        creditedAt: now
+      };
+    }
   }
 
   saveOrders();
@@ -2218,6 +2439,61 @@ function deleteTestOrder(orderId) {
       showToast('Тестовый заказ удалён', 'success');
     }
   });
+}
+
+function payReferral(orderId) {
+  if (!isManager) return;
+
+  const order = orders.find(item => item.id === orderId);
+  if (!order?.referral?.credited || order.referral.paid) return;
+
+  const percent = Number(order.referral.percent) || REFERRAL_PERCENT;
+  const amount = Number(order.referral.reward) || Math.round((Number(order.total) || 0) * percent / 100);
+
+  openConfirm({
+    title: 'Выплатить реферал?',
+    text: `Отметьте выплату ${formatPrice(amount)} ₽ пригласившему (ID ${order.referral.referrerId}). Баланс уменьшится, а заказ сохранит отметку о выплате.`,
+    confirmText: 'ВЫПЛАТИТЬ',
+    icon: 'send',
+    onConfirm: () => completeReferralPayout(orderId)
+  });
+}
+
+async function completeReferralPayout(orderId) {
+  const order = orders.find(item => item.id === orderId);
+  if (!order?.referral || order.referral.paid) return;
+
+  const initData = ensureTelegramApp()?.initData || '';
+  if (!ORDERS_ENDPOINT || !initData) {
+    showToast('Откройте сайт через Telegram, чтобы отметить выплату', 'error');
+    return;
+  }
+
+  try {
+    const response = await fetch(ORDERS_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'referral_pay', id: orderId, initData })
+    });
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      showToast(data.error === 'already_paid' ? 'Выплата уже отмечена' : 'Не удалось отметить выплату', 'error');
+      return;
+    }
+
+    if (data.order?.referral) {
+      order.referral = data.order.referral;
+      saveOrders();
+      renderOrders();
+    }
+
+    showToast('Выплата отмечена', 'success');
+    playSound('success');
+    triggerHaptic('success');
+  } catch (error) {
+    showToast('Нет связи с сервером', 'error');
+  }
 }
 
 function resendOrder(orderId) {
@@ -2653,7 +2929,7 @@ function buildProductCard(product, options = {}) {
           ? `<button class="card-btn" data-add="${product.id}">
                ${isOutOfStock ? 'ПОД ЗАКАЗ' : 'В КОРЗИНУ'}
              </button>`
-          : `<span class="card-view-hint">Смотреть <span aria-hidden="true">→</span></span>`}
+          : ''}
       </div>
     </div>`;
 }
@@ -3986,6 +4262,7 @@ function setView(view) {
 
   if (view === 'about') loadReviews();
   if (view === 'favorites') renderFavorites();
+  if (view === 'profile') renderReferral();
   if (view === 'home') renderResumeBanner();
   if (view === 'home' && productsLoaded) renderCatalog();
   renderRecent();
@@ -4080,6 +4357,12 @@ function bindEvents() {
     else window.open(url, '_blank', 'noopener');
   });
 
+  // Реферальная программа
+  document.getElementById('refCopyBtn')?.addEventListener('click', copyReferralLink);
+  document.getElementById('refShareBtn')?.addEventListener('click', shareReferral);
+  document.getElementById('refPayoutBtn')?.addEventListener('click', requestReferralPayout);
+  document.getElementById('refLinkInput')?.addEventListener('focus', event => event.target.select());
+
   // Заказы
   document.getElementById('closeOrders')?.addEventListener('click', () => closeModal('ordersModal'));
   document.getElementById('ordersBody')?.addEventListener('click', event => {
@@ -4114,6 +4397,10 @@ function bindEvents() {
     }
     if (action === 'delete') {
       deleteTestOrder(orderId);
+      return;
+    }
+    if (action === 'referral-pay') {
+      payReferral(orderId);
       return;
     }
     if (action === 'manager' || action === 'delivery' || action === 'received' || action === 'canceled') {
@@ -4602,6 +4889,7 @@ function initTrustMarquee() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  captureReferral();
   updateGreeting(null);
   updateSoundToggle();
   initTelegram();
@@ -4656,6 +4944,7 @@ Object.assign(window, {
   openInfoModal,
   openCart,
   openFavorites,
+  openReferral,
   openLightbox,
   closeLightbox,
   closeModal,

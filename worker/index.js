@@ -26,6 +26,7 @@ const CORS = {
 const MAX_AUTH_AGE_SECONDS = 24 * 60 * 60;
 const STORE_URL = 'https://vegnette.github.io/pf-store/';
 const MANAGER_USERNAME = 'PF_Store_manager';
+const REFERRAL_PERCENT = 10;
 
 // Четыре этапа заказа + отмена. Старые статусы приводим к новым.
 const ORDER_STATUSES = ['created', 'manager', 'delivery', 'received', 'canceled'];
@@ -210,6 +211,10 @@ async function notifyManager(env, order) {
     if (order.delivery.comment) lines.push(`Комментарий: ${order.delivery.comment}`);
   }
 
+  if (order.referral?.referrerId) {
+    lines.push(`🎁 Реферал: ID ${order.referral.referrerId} · ${REFERRAL_PERCENT}% = ${formatMoney(referralReward(order))} после получения`);
+  }
+
   await sendTelegram(env, managerToken(env), env.MANAGER_CHAT_ID, lines.join('\n'));
 }
 
@@ -248,6 +253,206 @@ async function notifyWatchers(env, productId, title, price) {
   }
 
   return sent;
+}
+
+// --- РЕФЕРАЛЬНАЯ ПРОГРАММА ---
+// Друг оформляет заказ по ссылке ?ref=<telegram_id>. После статуса «получен»
+// пригласившему начисляется 10% от суммы заказа.
+
+function normalizeReferralId(value) {
+  const digits = String(value ?? '').trim().replace(/^ref[_-]?/i, '');
+  return /^\d{5,20}$/.test(digits) ? digits : '';
+}
+
+function referralKey(id) {
+  return `ref:${id}`;
+}
+
+function referralRecordShape(record, id) {
+  const owner = String(record?.id || id || '');
+  const friends = Array.isArray(record?.friends)
+    ? [...new Set(record.friends.map(String).filter(Boolean))]
+    : [];
+
+  return {
+    id: owner,
+    friends,
+    orders: Math.max(0, Math.round(Number(record?.orders) || 0)),
+    earned: Math.max(0, Math.round(Number(record?.earned) || 0)),
+    available: Math.max(0, Math.round(Number(record?.available) || 0)),
+    paid: Math.max(0, Math.round(Number(record?.paid) || 0)),
+    history: Array.isArray(record?.history) ? record.history.slice(-50) : [],
+    updatedAt: record?.updatedAt || null
+  };
+}
+
+async function getReferralSummary(env, id) {
+  const record = referralRecordShape(
+    await env.ORDERS_KV.get(referralKey(id), 'json'),
+    id
+  );
+
+  return {
+    id: record.id,
+    invited: record.friends.length,
+    orders: record.orders,
+    earned: record.earned,
+    available: record.available,
+    paid: record.paid
+  };
+}
+
+async function saveReferralRecord(env, record) {
+  await env.ORDERS_KV.put(referralKey(record.id), JSON.stringify(record));
+}
+
+function referralReward(order) {
+  const percent = REFERRAL_PERCENT;
+  const total = Math.max(0, Math.round(Number(order?.total) || 0));
+  return Math.round(total * percent / 100);
+}
+
+function attachReferralToOrder(env, order, user) {
+  const refId = normalizeReferralId(order.referral?.referrerId);
+  const buyerId = String(user?.id || '');
+
+  if (!refId || !buyerId || refId === buyerId || isTestOrder(order)) {
+    delete order.referral;
+    return;
+  }
+
+  if (managerIds(env).some(id => String(id) === refId)) {
+    delete order.referral;
+    return;
+  }
+
+  order.referral = {
+    referrerId: refId,
+    percent: REFERRAL_PERCENT,
+    credited: false,
+    reward: 0
+  };
+}
+
+async function registerReferralFriend(env, order) {
+  const refId = normalizeReferralId(order.referral?.referrerId);
+  const buyerId = String(order.user?.id || '');
+  if (!refId || !buyerId || refId === buyerId || isTestOrder(order)) return;
+
+  const record = referralRecordShape(
+    await env.ORDERS_KV.get(referralKey(refId), 'json'),
+    refId
+  );
+
+  if (record.friends.includes(buyerId)) return;
+
+  record.friends.push(buyerId);
+  record.updatedAt = new Date().toISOString();
+  await saveReferralRecord(env, record);
+}
+
+async function creditReferral(env, order) {
+  const referral = order.referral;
+  if (!referral || referral.credited || isTestOrder(order)) return 0;
+
+  const refId = normalizeReferralId(referral.referrerId);
+  const buyerId = String(order.user?.id || '');
+  if (!refId || !buyerId || refId === buyerId) return 0;
+  if (managerIds(env).some(id => String(id) === refId)) return 0;
+
+  const reward = referralReward(order);
+  if (reward <= 0) return 0;
+
+  const record = referralRecordShape(
+    await env.ORDERS_KV.get(referralKey(refId), 'json'),
+    refId
+  );
+  const now = new Date().toISOString();
+
+  if (!record.friends.includes(buyerId)) record.friends.push(buyerId);
+  record.orders += 1;
+  record.earned += reward;
+  record.available += reward;
+  record.history.push({
+    type: 'credit',
+    orderId: order.id,
+    buyerId,
+    total: Math.max(0, Math.round(Number(order.total) || 0)),
+    percent: REFERRAL_PERCENT,
+    reward,
+    at: now
+  });
+  record.history = record.history.slice(-50);
+  record.updatedAt = now;
+
+  await saveReferralRecord(env, record);
+
+  order.referral = {
+    ...referral,
+    percent: REFERRAL_PERCENT,
+    reward,
+    credited: true,
+    creditedAt: now
+  };
+
+  await sendTelegram(
+    env,
+    env.BOT_TOKEN_MAIN || env.BOT_TOKEN,
+    refId,
+    [
+      `🎁 Вам начислено ${formatMoney(reward)} за заказ друга.`,
+      `Доступный баланс: ${formatMoney(record.available)}.`,
+      `Выплата — через менеджера: https://t.me/${MANAGER_USERNAME}`
+    ].join('\n')
+  );
+
+  return reward;
+}
+
+async function markReferralPaid(env, order, manager) {
+  if (!order.referral?.credited) return { error: 'not_credited' };
+  if (order.referral.paid) return { error: 'already_paid' };
+
+  const refId = normalizeReferralId(order.referral.referrerId);
+  const amount = Math.max(0, Math.round(Number(order.referral.reward) || 0));
+  if (!refId || !amount) return { error: 'nothing_to_pay' };
+
+  const record = referralRecordShape(
+    await env.ORDERS_KV.get(referralKey(refId), 'json'),
+    refId
+  );
+  const now = new Date().toISOString();
+
+  record.available = Math.max(0, record.available - amount);
+  record.paid += amount;
+  record.history.push({
+    type: 'payout',
+    orderId: order.id,
+    amount,
+    by: manager?.username || manager?.first_name || 'manager',
+    at: now
+  });
+  record.history = record.history.slice(-50);
+  record.updatedAt = now;
+
+  await saveReferralRecord(env, record);
+
+  order.referral = {
+    ...order.referral,
+    paid: true,
+    paidAt: now,
+    paidBy: manager?.username || manager?.first_name || 'manager'
+  };
+  await putOrder(env, order);
+
+  await sendTelegram(
+    env,
+    env.BOT_TOKEN_MAIN || env.BOT_TOKEN,
+    refId,
+    `💸 Выплата ${formatMoney(amount)} по реферальной программе отмечена. Спасибо!`
+  );
+
+  return { order };
 }
 
 // --- ОТЧЁТ ЗА ДЕНЬ ---
@@ -411,7 +616,9 @@ export default {
 
       visible.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
 
-      return json({ orders: visible, manager: isManager(user, env) });
+      const referral = isManager(user, env) ? null : await getReferralSummary(env, user.id);
+
+      return json({ orders: visible, manager: isManager(user, env), referral });
     }
 
     if (request.method !== 'POST') {
@@ -494,6 +701,7 @@ export default {
         if (!order.confirmedAt) order.confirmedAt = order.updatedAt;
         order.deliveredAt = order.updatedAt;
         order.receivedAt = order.updatedAt;
+        await creditReferral(env, order);
       }
 
       await putOrder(env, order);
@@ -510,6 +718,18 @@ export default {
 
       await env.ORDERS_KV.delete(`order:${order.id}`);
       return json({ ok: true });
+    }
+
+    // Отметка выплаты реферального вознаграждения менеджером
+    if (body.type === 'referral_pay') {
+      if (!manager) return json({ error: 'manager_only' }, 403);
+
+      const order = await getOrder(env, body.id);
+      if (!order) return json({ error: 'not_found' }, 404);
+
+      const result = await markReferralPaid(env, order, user);
+      if (result.error) return json({ error: result.error }, 400);
+      return json(result);
     }
 
     // Создание или обновление заказа
@@ -548,9 +768,20 @@ export default {
     }
 
     const isNew = !existing;
+
+    if (!manager) {
+      if (isNew) {
+        attachReferralToOrder(env, order, user);
+      } else {
+        order.referral = existing.referral || null;
+        if (!order.referral) delete order.referral;
+      }
+    }
+
     await putOrder(env, order);
 
     if (isNew && !manager && !isTestOrder(order)) {
+      await registerReferralFriend(env, order);
       await notifyManager(env, order);
     }
 
