@@ -481,29 +481,6 @@ button { touch-action: manipulation; }
 .profile-contact-item:active { border-color: var(--accent); }
 .profile-contact-item svg { color: var(--accent); flex-shrink: 0; }
 
-/* Реферальная программа в профиле */
-.profile-referral-wrap { border-bottom: 1px solid var(--border); }
-.referral-card { background: linear-gradient(145deg, rgba(109, 223, 200, 0.1), rgba(109, 223, 200, 0.02)); border: 1px solid rgba(109, 223, 200, 0.3); border-radius: var(--radius-lg); padding: 16px; }
-.referral-kicker { font-size: 9px; letter-spacing: 1.6px; color: var(--accent); font-weight: 800; text-transform: uppercase; margin-bottom: 12px; }
-.referral-head { display: flex; align-items: center; gap: 14px; }
-.referral-percent { flex: 0 0 auto; font-size: 32px; font-weight: 900; color: var(--accent); line-height: 1; letter-spacing: -1px; }
-.referral-title { font-size: 14px; font-weight: 800; text-transform: uppercase; margin-bottom: 4px; }
-.referral-text { font-size: 11px; color: var(--text-2); line-height: 1.5; }
-.referral-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 14px; }
-.referral-stat { background: rgba(0, 0, 0, 0.28); border: 1px solid rgba(109, 223, 200, 0.15); border-radius: var(--radius); padding: 10px 6px; text-align: center; }
-.referral-stat-value { display: block; font-size: 14px; font-weight: 900; color: var(--text); margin-bottom: 3px; }
-.referral-stat-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--text-3); }
-.referral-link-row { display: flex; gap: 8px; margin-top: 14px; }
-.referral-link-input { flex: 1; min-width: 0; background: rgba(0, 0, 0, 0.35); border: 1px solid var(--border); border-radius: 10px; color: var(--text-2); font-size: 10px; padding: 10px; }
-.referral-link-input:focus { outline: none; border-color: var(--accent); color: var(--text); }
-.referral-copy-btn { flex: 0 0 auto; padding: 0 12px; border: 1px solid rgba(109, 223, 200, 0.4); background: rgba(109, 223, 200, 0.12); color: var(--accent); border-radius: 10px; font-size: 10px; font-weight: 800; letter-spacing: 0.4px; cursor: pointer; }
-.referral-copy-btn:disabled { opacity: 0.45; cursor: default; }
-.referral-actions { display: flex; gap: 8px; margin-top: 8px; }
-.referral-share-btn { flex: 1; padding: 11px; border: none; border-radius: var(--radius); background: var(--accent); color: #000; font-size: 11px; font-weight: 800; letter-spacing: 0.5px; cursor: pointer; }
-.referral-share-btn:disabled { opacity: 0.45; cursor: default; }
-.referral-payout-btn { flex: 0 0 auto; padding: 0 14px; border: 1px solid rgba(109, 223, 200, 0.45); background: transparent; color: var(--accent); border-radius: var(--radius); font-size: 11px; font-weight: 800; cursor: pointer; }
-.referral-note { margin-top: 10px; font-size: 10px; color: var(--text-3); line-height: 1.5; }
-
 /* О НАС */
 .about-hero { position: relative; margin: 16px; border-radius: var(--radius-lg); overflow: hidden; border: 1px solid var(--border); background: var(--surface); }
 .about-hero-img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-bottom: 1px solid var(--border); }
@@ -539,12 +516,6 @@ button { touch-action: manipulation; }
 .about-trust-text { font-size: 11px; color: var(--text-2); line-height: 1.5; }
 
 .about-section-sub { margin: -6px 0 14px; font-size: 11px; color: var(--text-3); line-height: 1.5; }
-
-.about-referral { display: flex; align-items: center; gap: 14px; background: linear-gradient(135deg, rgba(109, 223, 200, 0.12), rgba(109, 223, 200, 0.03)); border: 1px solid rgba(109, 223, 200, 0.3); border-radius: var(--radius-lg); padding: 16px; }
-.about-referral-percent { flex: 0 0 auto; font-size: 34px; font-weight: 900; color: var(--accent); line-height: 1; letter-spacing: -1px; }
-.about-referral-title { font-size: 13px; font-weight: 800; text-transform: uppercase; margin-bottom: 3px; }
-.about-referral-text { font-size: 11px; color: var(--text-2); line-height: 1.5; }
-.about-referral-btn { width: 100%; margin-top: 10px; padding: 12px; border: 1px solid rgba(109, 223, 200, 0.4); background: rgba(109, 223, 200, 0.1); color: var(--accent); border-radius: var(--radius); font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; }
 
 .about-story { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 16px; }
 .about-story p { font-size: 12px; color: var(--text-2); line-height: 1.65; }
@@ -1581,7 +1552,6 @@ button { touch-action: manipulation; }
 .order-discounts { padding: 4px 0 6px; }
 .order-discount-line { display: flex; justify-content: space-between; gap: 10px; padding: 3px 0; font-size: 11px; color: var(--accent); }
 .order-buyer { margin-top: 8px; font-size: 10px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.4px; }
-.order-referral { margin-top: 10px; padding: 8px 10px; border-radius: 8px; background: rgba(109, 223, 200, 0.08); border: 1px solid rgba(109, 223, 200, 0.2); font-size: 11px; color: var(--accent); line-height: 1.4; }
 .order-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .order-action-btn {
   flex: 1 1 120px;
