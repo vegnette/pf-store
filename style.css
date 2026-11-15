@@ -1135,7 +1135,7 @@ button { touch-action: manipulation; }
 .lightbox-hint { position: absolute; bottom: max(20px, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); font-size: 11px; color: var(--text-2); text-transform: uppercase; letter-spacing: 1px; pointer-events: none; }
 @keyframes zoomIn { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 
-#view-home, #view-profile, #view-about, #view-favorites { animation: fadeInView 0.3s ease-in-out; }
+#view-home, #view-profile, #view-about, #view-favorites, #view-edit { animation: fadeInView 0.3s ease-in-out; }
 @keyframes fadeInView { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 
 /* ============================================================
@@ -2061,6 +2061,242 @@ textarea:focus-visible,
   font-size: 11px;
   line-height: 1.35;
   color: var(--text-3);
+}
+
+/* ── Режим менеджера: без корзины и избранного ───────────── */
+.manager-mode .card-fav,
+.manager-mode .card-btn,
+.manager-mode #productFavBtn,
+.manager-mode #addToCart,
+.manager-mode #productBuyBar,
+.manager-mode #stockNotifyBtn {
+  display: none !important;
+}
+
+/* ── Вкладка «Редактировать» (только менеджер) ───────────── */
+.edit-hero {
+  padding: 24px 16px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.edit-kicker {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  color: var(--accent);
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+.edit-title {
+  font-size: 24px;
+  font-weight: 800;
+  line-height: 1.15;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.edit-sub {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-2);
+}
+
+.edit-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+}
+
+.edit-loading {
+  padding: 24px 4px;
+  font-size: 13px;
+  color: var(--text-3);
+}
+
+.edit-card {
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.edit-card-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.edit-card-head img {
+  width: 64px;
+  height: 64px;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-2);
+  object-fit: cover;
+}
+
+.edit-card-heading { min-width: 0; }
+
+.edit-card-title {
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.edit-card-meta {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.edit-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.edit-field { display: block; }
+
+.edit-field > span {
+  display: block;
+  margin-bottom: 5px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.8px;
+  color: var(--text-3);
+}
+
+.edit-field input,
+.edit-field textarea {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.edit-field input { text-align: center; }
+
+.edit-field textarea {
+  min-height: 110px;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.edit-field input:focus,
+.edit-field textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(109, 223, 200, 0.12);
+}
+
+.edit-field--wide { margin-bottom: 12px; }
+
+.edit-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.edit-save {
+  padding: 12px 20px;
+  border: none;
+  border-radius: 12px;
+  background: var(--accent);
+  color: #000;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: filter 0.2s, transform 0.2s;
+}
+
+.edit-save:active { transform: scale(0.98); filter: brightness(0.92); }
+.edit-save:disabled { opacity: 0.6; cursor: progress; }
+
+.edit-status {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+/* ── Быстрое оформление «как в прошлый раз» ──────────────── */
+.checkout-quick {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  margin: 12px 0 4px;
+  padding: 12px 14px;
+  border: 1px solid rgba(109, 223, 200, 0.35);
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(109, 223, 200, 0.14), rgba(109, 223, 200, 0.04));
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.checkout-quick[hidden] { display: none; }
+.checkout-quick:active { border-color: var(--accent); }
+
+.checkout-quick-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: rgba(109, 223, 200, 0.16);
+  color: var(--accent);
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.checkout-quick-body { min-width: 0; }
+
+.checkout-quick-title {
+  display: block;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.checkout-quick-sub {
+  display: block;
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes checkoutPulse {
+  0% { box-shadow: 0 0 0 0 rgba(109, 223, 200, 0.45); }
+  100% { box-shadow: 0 0 0 16px rgba(109, 223, 200, 0); }
+}
+
+.checkout-submit--pulse { animation: checkoutPulse 0.9s ease-out; }
+
+@media (prefers-reduced-motion: reduce) {
+  .checkout-submit--pulse {
+    animation: none;
+    box-shadow: 0 0 0 3px rgba(109, 223, 200, 0.35);
+  }
+  .edit-save { transition: none; }
 }
 
 /* ============================================================

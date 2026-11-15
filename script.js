@@ -49,6 +49,7 @@ let tg = window.Telegram?.WebApp || null;
 let products = [];
 let productsLoaded = false;
 let stockOverrides = {};
+let productOverrides = {};
 let currentCategory = 'all';
 let searchQuery = '';
 let currentView = 'home';
@@ -816,32 +817,65 @@ async function openStockNotify(product) {
   showToast('Запрос открыт в Telegram', 'success');
 }
 
-async function loadStockOverrides() {
+async function loadProductOverrides() {
   if (!ORDERS_ENDPOINT) return;
 
   try {
-    const response = await fetch(`${ORDERS_ENDPOINT}/stock`, { headers: { Accept: 'application/json' } });
-    if (!response.ok) return;
+    let data = null;
+    let response = await fetch(`${ORDERS_ENDPOINT}/overrides`, { headers: { Accept: 'application/json' } });
 
-    const data = await response.json();
-    const stock = data?.stock;
-    if (!stock || typeof stock !== 'object') return;
+    if (!response.ok) {
+      // Старый Worker без /overrides: продолжаем работать с наличием.
+      response = await fetch(`${ORDERS_ENDPOINT}/stock`, { headers: { Accept: 'application/json' } });
+      if (!response.ok) return;
+    }
 
-    stockOverrides = stock;
-    applyStockOverrides();
+    data = await response.json();
+    if (data?.stock && typeof data.stock === 'object') stockOverrides = data.stock;
+    if (data?.products && typeof data.products === 'object') productOverrides = data.products;
+
+    applyProductOverrides();
   } catch (error) {
     // офлайн — остаются значения из products.json
   }
 }
 
-function applyStockOverrides() {
+function applyProductOverrides() {
   let changed = false;
 
   products.forEach(product => {
-    const value = stockOverrides[String(product.id)];
-    if (value !== undefined && Number.isFinite(Number(value))) {
-      product.stock = Number(value);
+    const id = String(product.id);
+
+    const stockValue = stockOverrides[id];
+    if (stockValue !== undefined && Number.isFinite(Number(stockValue))) {
+      product.stock = Number(stockValue);
       changed = true;
+    }
+
+    const override = productOverrides[id];
+    if (!override || typeof override !== 'object') return;
+
+    if (Number.isFinite(Number(override.price)) && Number(override.price) > 0) {
+      product.price = Number(override.price);
+      changed = true;
+    }
+
+    if (override.oldPrice !== undefined && Number.isFinite(Number(override.oldPrice))) {
+      product.oldPrice = Number(override.oldPrice);
+      changed = true;
+    }
+
+    if (typeof override.desc === 'string') {
+      const desc = override.desc.trim();
+      if (desc) {
+        product.desc = desc;
+        product.descOverridden = true;
+        changed = true;
+      } else if (product.descOverridden) {
+        delete product.desc;
+        delete product.descOverridden;
+        changed = true;
+      }
     }
   });
 
@@ -849,9 +883,46 @@ function applyStockOverrides() {
 
   renderCatalog();
   renderRecent();
+  renderFavorites();
+  renderResumeBanner();
   updateUI();
   updateFavoriteUI();
+  if (currentView === 'edit') renderEditList();
+  refreshOpenProductView();
 }
+
+function refreshOpenProductView() {
+  if (currentProductId == null) return;
+
+  const product = products.find(item => Number(item.id) === Number(currentProductId));
+  const modal = document.getElementById('productModal');
+  if (!product || !modal?.classList.contains('active')) return;
+
+  const price = document.getElementById('productPrice');
+  const oldPrice = document.getElementById('productOldPrice');
+  const buyBarPrice = document.getElementById('buyBarPrice');
+  const buyBarOldPrice = document.getElementById('buyBarOldPrice');
+  const desc = document.getElementById('productDesc');
+
+  if (price) price.textContent = formatPrice(product.price);
+  if (oldPrice) {
+    oldPrice.textContent = product.oldPrice && product.oldPrice > product.price
+      ? formatPrice(product.oldPrice)
+      : '';
+  }
+  if (buyBarPrice) buyBarPrice.textContent = formatPrice(product.price);
+  if (buyBarOldPrice) {
+    buyBarOldPrice.textContent = product.oldPrice && product.oldPrice > product.price
+      ? formatPrice(product.oldPrice)
+      : '';
+    buyBarOldPrice.hidden = !buyBarOldPrice.textContent;
+  }
+  if (desc && product.desc) desc.textContent = product.desc;
+
+  renderProductStock(product);
+  updateProductSeo(product);
+}
+
 
 function copyText(text) {
   if (navigator.clipboard?.writeText) {
@@ -1600,6 +1671,24 @@ function applyManagerUI() {
   const subtitleEl = document.getElementById('profileSubtitle');
   if (roleEl) roleEl.hidden = !isManager;
   if (subtitleEl) subtitleEl.textContent = isManager ? 'Менеджер PF Store' : 'Покупатель PF Store';
+
+  document.body.classList.toggle('manager-mode', isManager);
+
+  const editTab = document.getElementById('navEditTab');
+  if (editTab) editTab.hidden = !isManager;
+
+  ['navFavoritesTab', 'navCartTab', 'navAboutTab'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.hidden = isManager;
+  });
+
+  ['profileCartBtn', 'profileFavoritesBtn'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.hidden = isManager;
+  });
+
+  if (isManager && ['favorites', 'about'].includes(currentView)) setView('home');
+  if (!isManager && currentView === 'edit') setView('home');
 }
 
 function applyTelegramUser(user) {
@@ -2435,7 +2524,8 @@ async function loadProducts() {
     updateFavoriteUI();
     updateStoreStatus();
     handleDeepLink();
-    loadStockOverrides();
+    loadProductOverrides();
+    if (currentView === 'edit') renderEditList();
 
     if (drops > 0) {
       notifyPriceDrops(drops);
@@ -3125,6 +3215,208 @@ async function saveProductStock(product, stock) {
   }
 }
 
+// ============================================================
+// РЕЖИМ МЕНЕДЖЕРА: РЕДАКТИРОВАНИЕ КАТАЛОГА
+// ============================================================
+
+function renderEditList() {
+  const container = document.getElementById('editList');
+  if (!container) return;
+
+  if (!productsLoaded) {
+    container.innerHTML = '<div class="edit-loading">Загружаем каталог…</div>';
+    return;
+  }
+
+  container.innerHTML = products.map(product => {
+    const image = getProductImages(product)[0] || NO_PHOTO;
+    const desc = typeof product.desc === 'string' ? product.desc : '';
+    const stock = Number(product.stock) || 0;
+
+    return `
+      <article class="edit-card" data-edit-id="${product.id}">
+        <div class="edit-card-head">
+          <img src="${image}" alt="" width="72" height="72" loading="lazy" decoding="async"
+               onerror="imageFallback(this)">
+          <div class="edit-card-heading">
+            <div class="edit-card-title">${escapeHtml(product.title)}</div>
+            <div class="edit-card-meta" data-edit-meta>
+              ID ${product.id} · ${escapeHtml(CATEGORY_LABELS[product.category] || product.category || '')} ·
+              ${stock > 0 ? `в наличии ${stock} шт.` : 'нет в наличии'}
+            </div>
+          </div>
+        </div>
+
+        <div class="edit-grid">
+          <label class="edit-field">
+            <span>ЦЕНА, ₽</span>
+            <input type="number" min="1" max="1000000" step="1" inputmode="numeric"
+                   data-edit-field="price" value="${Number(product.price) || 0}">
+          </label>
+          <label class="edit-field">
+            <span>СТАРАЯ ЦЕНА, ₽</span>
+            <input type="number" min="0" max="1000000" step="1" inputmode="numeric"
+                   data-edit-field="oldPrice" value="${Number(product.oldPrice) || 0}">
+          </label>
+          <label class="edit-field">
+            <span>НАЛИЧИЕ, ШТ.</span>
+            <input type="number" min="0" max="999" step="1" inputmode="numeric"
+                   data-edit-field="stock" value="${stock}">
+          </label>
+        </div>
+
+        <label class="edit-field edit-field--wide">
+          <span>ОПИСАНИЕ</span>
+          <textarea rows="6" maxlength="4000" data-edit-field="desc"
+                    placeholder="Загружаем описание…">${escapeHtml(desc)}</textarea>
+        </label>
+
+        <div class="edit-actions">
+          <button type="button" class="edit-save" data-edit-save>СОХРАНИТЬ</button>
+          <span class="edit-status" data-edit-status></span>
+        </div>
+      </article>`;
+  }).join('');
+
+  // Если ручной правки ещё нет — показываем текст из desc_file.
+  container.querySelectorAll('[data-edit-id]').forEach(card => {
+    const product = products.find(item => String(item.id) === card.dataset.editId);
+    if (!product || product.desc || !product.desc_file) return;
+
+    const textarea = card.querySelector('[data-edit-field="desc"]');
+    if (!textarea) return;
+
+    fetch(product.desc_file)
+      .then(response => response.ok ? response.text() : '')
+      .then(text => {
+        if (!textarea.value.trim() && text.trim()) textarea.value = text.trim();
+      })
+      .catch(() => {
+        // описание останется пустым — менеджер может ввести своё
+      });
+  });
+}
+
+async function saveProductData(product, payload) {
+  const initData = ensureTelegramApp()?.initData || '';
+
+  if (!ORDERS_ENDPOINT || !initData) {
+    showToast('Откройте сайт через Telegram, чтобы сохранять изменения', 'error');
+    return null;
+  }
+
+  try {
+    const response = await fetch(ORDERS_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'product',
+        productId: String(product.id),
+        title: product.title,
+        initData,
+        ...payload
+      })
+    });
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      const messages = {
+        manager_only: 'Нет прав менеджера',
+        invalid_price: 'Проверьте цену',
+        invalid_old_price: 'Проверьте старую цену',
+        invalid_product: 'Товар не найден'
+      };
+      showToast(messages[data.error] || 'Не удалось сохранить товар', 'error');
+      return null;
+    }
+
+    return data;
+  } catch (error) {
+    showToast('Нет связи с сервером', 'error');
+    return null;
+  }
+}
+
+async function saveProductFromEditCard(button) {
+  const card = button.closest('[data-edit-id]');
+  if (!card) return;
+
+  const product = products.find(item => String(item.id) === card.dataset.editId);
+  if (!product) return;
+
+  const priceInput = card.querySelector('[data-edit-field="price"]');
+  const oldPriceInput = card.querySelector('[data-edit-field="oldPrice"]');
+  const stockInput = card.querySelector('[data-edit-field="stock"]');
+  const descInput = card.querySelector('[data-edit-field="desc"]');
+  const statusEl = card.querySelector('[data-edit-status]');
+
+  const price = Math.round(Number(priceInput?.value));
+  const oldPrice = Math.max(0, Math.round(Number(oldPriceInput?.value) || 0));
+  const stock = Math.max(0, Math.min(999, Math.round(Number(stockInput?.value) || 0)));
+  const desc = String(descInput?.value || '').trim().slice(0, 4000);
+
+  if (!Number.isFinite(price) || price <= 0) {
+    showToast('Цена должна быть больше нуля', 'error');
+    priceInput?.focus();
+    return;
+  }
+
+  if (oldPrice > 0 && oldPrice <= price) {
+    showToast('Старая цена должна быть больше новой', 'error');
+    oldPriceInput?.focus();
+    return;
+  }
+
+  const previousStock = Number(product.stock) || 0;
+  button.disabled = true;
+  button.textContent = 'СОХРАНЯЮ…';
+  if (statusEl) statusEl.textContent = '';
+
+  const data = await saveProductData(product, { price, oldPrice, stock, desc, previousStock });
+
+  button.disabled = false;
+  button.textContent = 'СОХРАНИТЬ';
+  if (!data) return;
+
+  product.price = price;
+  product.oldPrice = oldPrice;
+  product.stock = stock;
+  if (desc) {
+    product.desc = desc;
+    product.descOverridden = true;
+  } else {
+    delete product.desc;
+    delete product.descOverridden;
+  }
+
+  productOverrides[String(product.id)] = { price, oldPrice, desc };
+  stockOverrides[String(product.id)] = stock;
+
+  const meta = card.querySelector('[data-edit-meta]');
+  if (meta) {
+    meta.textContent = `ID ${product.id} · ${CATEGORY_LABELS[product.category] || product.category || ''} · ${stock > 0 ? `в наличии ${stock} шт.` : 'нет в наличии'}`;
+  }
+  if (statusEl) {
+    statusEl.textContent = data.notified
+      ? `Сохранено · уведомлено ${data.notified}`
+      : 'Сохранено';
+  }
+
+  renderCatalog();
+  renderRecent();
+  renderFavorites();
+  renderResumeBanner();
+  updateUI();
+  updateFavoriteUI();
+  refreshOpenProductView();
+
+  playSound('success');
+  triggerHaptic('success');
+  showToast('Товар обновлён', 'success');
+}
+
+
+
 function renderProductGift(product) {
   const giftEl = document.getElementById('productGift');
   if (!giftEl) return;
@@ -3532,6 +3824,73 @@ function prefillCheckoutForm() {
   updateCheckoutAddressField();
   clearCheckoutError();
   [name, phone, address].forEach(el => el?.classList.remove('invalid'));
+  renderCheckoutQuick();
+}
+
+function maskPhone(value) {
+  const digits = String(value || '').replace(/\D/g, '');
+  if (digits.length < 4) return String(value || '');
+
+  const normalized = digits[0] === '8' ? `7${digits.slice(1)}` : (digits[0] === '7' ? digits : `7${digits}`);
+  const code = normalized.slice(1, 4);
+  const tail = normalized.slice(-2);
+  return `+7 ${code} ···-${tail}`;
+}
+
+function renderCheckoutQuick() {
+  const button = document.getElementById('checkoutQuick');
+  const subtitle = document.getElementById('checkoutQuickSub');
+  if (!button) return;
+
+  const saved = getCheckoutCustomer();
+  const digits = String(saved.phone || '').replace(/\D/g, '');
+  const hasOrder = orders.some(order => !isTestOrder(order));
+  const show = Boolean(saved.name && digits.length >= 10 && hasOrder && cart.length);
+
+  button.hidden = !show;
+  if (!show) return;
+
+  const method = ['city', 'russia'].includes(saved.delivery) ? saved.delivery : 'pickup';
+  const labels = {
+    pickup: 'самовывоз',
+    city: 'доставка по Барнаулу',
+    russia: 'отправка по России'
+  };
+
+  if (subtitle) {
+    subtitle.textContent = `${String(saved.name).trim()} · ${maskPhone(saved.phone)} · ${labels[method]}`;
+  }
+}
+
+function applyQuickCheckout() {
+  const saved = getCheckoutCustomer();
+  const name = document.getElementById('checkoutName');
+  const phone = document.getElementById('checkoutPhone');
+  const address = document.getElementById('checkoutAddress');
+
+  if (name) name.value = saved.name || currentUser?.first_name || '';
+  if (phone) phone.value = formatPhoneInput(saved.phone || '');
+  if (address) address.value = saved.address || '';
+
+  const method = ['city', 'russia'].includes(saved.delivery) ? saved.delivery : 'pickup';
+  const radio = document.querySelector(`input[name="delivery"][value="${method}"]`);
+  if (radio) radio.checked = true;
+
+  updateCheckoutAddressField();
+  renderCheckoutSummary();
+  clearCheckoutError();
+
+  const submit = document.querySelector('.checkout-submit');
+  if (submit) {
+    submit.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'center' });
+    submit.classList.remove('checkout-submit--pulse');
+    void submit.offsetWidth;
+    submit.classList.add('checkout-submit--pulse');
+    setTimeout(() => submit.classList.remove('checkout-submit--pulse'), 900);
+  }
+
+  playSound('tap');
+  triggerHaptic('selection');
 }
 
 function openCheckout() {
@@ -3965,7 +4324,9 @@ async function promptInstall() {
 // ============================================================
 
 function setView(view) {
-  if (!['home', 'about', 'profile', 'favorites'].includes(view)) return;
+  if (view === 'edit' && !isManager) return;
+  if (isManager && ['favorites', 'about'].includes(view)) return;
+  if (!['home', 'about', 'profile', 'favorites', 'edit'].includes(view)) return;
 
   currentView = view;
   playSound('tap');
@@ -3975,6 +4336,7 @@ function setView(view) {
   const viewProfile = document.getElementById('view-profile');
   const viewAbout = document.getElementById('view-about');
   const viewFavorites = document.getElementById('view-favorites');
+  const viewEdit = document.getElementById('view-edit');
   const searchWrap = document.getElementById('searchWrapper');
   const categories = document.getElementById('categories');
   const controls = document.querySelector('.controls');
@@ -3984,7 +4346,8 @@ function setView(view) {
     home: viewHome,
     about: viewAbout,
     profile: viewProfile,
-    favorites: viewFavorites
+    favorites: viewFavorites,
+    edit: viewEdit
   };
   Object.entries(views).forEach(([name, el]) => {
     if (el) el.style.display = name === view ? 'block' : 'none';
@@ -3998,10 +4361,11 @@ function setView(view) {
     home: 'navHome',
     about: 'navAboutTab',
     profile: 'navProfileTab',
-    favorites: 'navFavoritesTab'
+    favorites: 'navFavoritesTab',
+    edit: 'navEditTab'
   };
 
-  ['navHome', 'navCartTab', 'navAboutTab', 'navProfileTab', 'navFavoritesTab'].forEach(id => {
+  ['navHome', 'navCartTab', 'navAboutTab', 'navProfileTab', 'navFavoritesTab', 'navEditTab'].forEach(id => {
     document.getElementById(id)?.classList.remove('active');
   });
   document.getElementById(navMap[view])?.classList.add('active');
@@ -4010,6 +4374,7 @@ function setView(view) {
 
   if (view === 'about') loadReviews();
   if (view === 'favorites') renderFavorites();
+  if (view === 'edit') renderEditList();
   if (view === 'home') renderResumeBanner();
   if (view === 'home' && productsLoaded) renderCatalog();
   renderRecent();
@@ -4036,6 +4401,7 @@ function bindEvents() {
 
   // Навигация
   document.getElementById('navHome')?.addEventListener('click', () => setView('home'));
+  document.getElementById('navEditTab')?.addEventListener('click', () => setView('edit'));
   document.getElementById('navAboutTab')?.addEventListener('click', () => setView('about'));
   document.getElementById('navProfileTab')?.addEventListener('click', () => setView('profile'));
   document.getElementById('navFavoritesTab')?.addEventListener('click', openFavorites);
@@ -4104,9 +4470,15 @@ function bindEvents() {
     else window.open(url, '_blank', 'noopener');
   });
 
+  // Режим менеджера: сохранение карточки товара
+  document.getElementById('editList')?.addEventListener('click', event => {
+    const button = event.target.closest('[data-edit-save]');
+    if (!button) return;
+    saveProductFromEditCard(button);
+  });
+
   // Заказы
-  document.getElementById('closeOrders')?.addEventListener('click', () => closeModal('ordersModal'));
-  document.getElementById('ordersBody')?.addEventListener('click', event => {
+  document.getElementById('closeOrders')?.addEventListener('click', () => closeModal('ordersModal'));  document.getElementById('ordersBody')?.addEventListener('click', event => {
     const button = event.target.closest('[data-order-action]');
     if (!button) return;
 
@@ -4264,6 +4636,7 @@ function bindEvents() {
   // Оформление заказа
   document.getElementById('checkoutBtn')?.addEventListener('click', openCheckout);
   document.getElementById('checkoutForm')?.addEventListener('submit', submitCheckout);
+  document.getElementById('checkoutQuick')?.addEventListener('click', applyQuickCheckout);
 
   // Маска телефона: +7 (999) 000-00-00
   const phoneInput = document.getElementById('checkoutPhone');
@@ -4662,6 +5035,8 @@ document.addEventListener('DOMContentLoaded', () => {
       setTimeout(openCart, 500);
     } else if (!hasProduct && shortcutView === 'orders') {
       setTimeout(openOrders, 500);
+    } else if (!hasProduct && shortcutView === 'edit') {
+      setTimeout(() => { if (isManager) setView('edit'); }, 600);
     }
   } catch (error) {
     // некорректная ссылка не должна мешать загрузке

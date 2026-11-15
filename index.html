@@ -515,6 +515,15 @@
 
   </div>
 
+  <div id="view-edit" style="display: none;">
+    <section class="edit-hero">
+      <div class="edit-kicker">PF STORE · МЕНЕДЖЕР</div>
+      <h1 class="edit-title">Редактировать каталог</h1>
+      <p class="edit-sub">Цена, наличие и описание. Изменения сохраняются в Cloudflare и сразу видны покупателям.</p>
+    </section>
+    <div class="edit-list" id="editList"></div>
+  </div>
+
   <div id="view-profile" style="display: none;">
     <div class="profile-header">
       <div class="profile-avatar">
@@ -598,6 +607,10 @@
     <button class="nav-item active" id="navHome">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>
       <span>ГЛАВНАЯ</span>
+    </button>
+    <button class="nav-item" id="navEditTab" hidden>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"></path></svg>
+      <span>РЕДАКТИРОВАТЬ</span>
     </button>
     <button class="nav-item" id="navFavoritesTab" style="position: relative;">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>
@@ -755,6 +768,14 @@
       </div>
 
       <form class="checkout-form" id="checkoutForm" novalidate>
+        <button type="button" class="checkout-quick" id="checkoutQuick" hidden>
+          <span class="checkout-quick-icon" aria-hidden="true">↺</span>
+          <span class="checkout-quick-body">
+            <span class="checkout-quick-title">Оформить как в прошлый раз</span>
+            <span class="checkout-quick-sub" id="checkoutQuickSub"></span>
+          </span>
+        </button>
+
         <div class="checkout-summary" id="checkoutSummary"></div>
 
         <label class="checkout-field">
