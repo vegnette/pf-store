@@ -200,6 +200,29 @@ function getProductImages(product) {
   return images.length ? images : [NO_PHOTO];
 }
 
+// Плавный fallback для фото: WebP → JPEG → заглушка.
+// Вызывается из onerror="imageFallback(this)" в разметке карточек.
+function imageFallback(img) {
+  if (!img) return;
+
+  const source = img.currentSrc || img.src || '';
+  const step = img.dataset.fallback || '';
+
+  if (source.includes('no-photo.svg') || step === 'none') {
+    img.onerror = null;
+    return;
+  }
+
+  if (step !== 'jpg' && /\.webp(\?.*)?$/i.test(source)) {
+    img.dataset.fallback = 'jpg';
+    img.src = source.replace(/\.webp(\?.*)?$/i, '.jpg$1');
+    return;
+  }
+
+  img.dataset.fallback = 'none';
+  img.src = NO_PHOTO;
+}
+
 function getDiscount(product) {
   if (!product.oldPrice || product.oldPrice <= product.price) return 0;
   return Math.round((1 - product.price / product.oldPrice) * 100);
@@ -645,8 +668,8 @@ function renderRecent() {
     return `
       <button type="button" class="recent-card" data-recent="${product.id}"
               aria-label="Открыть товар: ${escapeHtml(product.title)}">
-        <img src="${image}" alt="${escapeHtml(product.title)}" loading="lazy" decoding="async"
-             onerror="this.onerror=null;this.src='${NO_PHOTO}'">
+        <img src="${image}" alt="${escapeHtml(product.title)}" width="820" height="820" loading="lazy" decoding="async"
+             onerror="imageFallback(this)">
         <span class="recent-card-title">${escapeHtml(product.title)}</span>
         <span class="recent-price">${formatPrice(product.price)}</span>
       </button>`;
@@ -690,8 +713,8 @@ function renderSimilar(product) {
     return `
       <button type="button" class="similar-card" data-similar="${item.id}"
               aria-label="Открыть похожий товар: ${escapeHtml(item.title)}">
-        <img src="${image}" alt="${escapeHtml(item.title)}" loading="lazy" decoding="async"
-             onerror="this.onerror=null;this.src='${NO_PHOTO}'">
+        <img src="${image}" alt="${escapeHtml(item.title)}" width="820" height="820" loading="lazy" decoding="async"
+             onerror="imageFallback(this)">
         <span class="similar-card-title">${escapeHtml(item.title)}</span>
         <span class="similar-price">${formatPrice(item.price)}</span>
       </button>`;
@@ -2617,8 +2640,8 @@ function buildProductCard(product, options = {}) {
     ? `<div class="img-sub-row ${subImages.length === 1 ? 'single' : ''}">
          ${subImages.map((src, index) => `
            <div class="img-sub">
-             <img src="${src}" alt="${safeTitle} — фото ${index + 2}" loading="lazy" decoding="async"
-                  onerror="this.onerror=null;this.src='${NO_PHOTO}'">
+             <img src="${src}" alt="${safeTitle} — фото ${index + 2}" width="820" height="820" loading="lazy" decoding="async"
+                  onerror="imageFallback(this)">
            </div>`).join('')}
        </div>`
     : '';
@@ -2634,8 +2657,8 @@ function buildProductCard(product, options = {}) {
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>
         </button>
         <div class="img-main">
-          <img src="${img1}" alt="${safeTitle}" loading="lazy" decoding="async"
-               onerror="this.onerror=null;this.src='${NO_PHOTO}'">
+          <img src="${img1}" alt="${safeTitle}" width="820" height="820" loading="lazy" decoding="async"
+               onerror="imageFallback(this)">
         </div>
         ${subImagesHtml}
       </div>
@@ -2698,7 +2721,7 @@ function buildEmptyCatalogHtml() {
   const suggest = suggestions.map(product => {
     const image = getProductImages(product)[0] || NO_PHOTO;
     return `<button type="button" class="empty-suggest-item" data-empty-product="${product.id}">
-      <img src="${image}" alt="" loading="lazy" decoding="async" onerror="this.onerror=null;this.src='${NO_PHOTO}'">
+      <img src="${image}" alt="" loading="lazy" decoding="async" onerror="imageFallback(this)">
       <span class="empty-suggest-name">${escapeHtml(product.title)}</span>
       <span class="empty-suggest-price">${formatPrice(product.price)}</span>
     </button>`;
@@ -2835,8 +2858,8 @@ function openProduct(id) {
   // Галерея
   gallery.innerHTML = images.map((src, index) => `
     <img src="${src}" alt="${escapeHtml(product.title)} — фото ${index + 1}"
-         loading="${index === 0 ? 'eager' : 'lazy'}" decoding="async" data-index="${index}"
-         onerror="this.onerror=null;this.src='${NO_PHOTO}'">
+         width="820" height="820" loading="${index === 0 ? 'eager' : 'lazy'}" decoding="async" data-index="${index}"
+         onerror="imageFallback(this)">
   `).join('');
 
   gallery.querySelectorAll('img').forEach(img => {
@@ -2857,8 +2880,8 @@ function openProduct(id) {
       ? images.map((src, index) => `
         <button type="button" class="gallery-thumb ${index === 0 ? 'active' : ''}" data-index="${index}"
                 role="tab" aria-selected="${index === 0}" aria-label="Фото ${index + 1}">
-          <img src="${src}" alt="" loading="lazy" decoding="async"
-               onerror="this.onerror=null;this.src='${NO_PHOTO}'">
+          <img src="${src}" alt="" width="820" height="820" loading="lazy" decoding="async"
+               onerror="imageFallback(this)">
         </button>`).join('')
       : '';
   }
@@ -3119,7 +3142,7 @@ function renderProductGift(product) {
   giftEl.innerHTML = `
     ${giftImages[0]
       ? `<img src="${giftImages[0]}" alt="Подарок к покупке" loading="lazy" decoding="async"
-              onerror="this.onerror=null;this.src='${NO_PHOTO}'">`
+              onerror="imageFallback(this)">`
       : '<span class="gift-emoji" aria-hidden="true">🎁</span>'}
     <div>
       <div class="gift-title">ПОДАРОК К ПОКУПКЕ</div>
@@ -3293,8 +3316,8 @@ function renderCartItems() {
 
       return `
         <div class="cart-item">
-          <img src="${images[0]}" alt="${escapeHtml(item.title)}" loading="lazy" decoding="async"
-               onerror="this.onerror=null;this.src='${NO_PHOTO}'">
+          <img src="${images[0]}" alt="${escapeHtml(item.title)}" width="820" height="820" loading="lazy" decoding="async"
+               onerror="imageFallback(this)">
           <div class="cart-item-info">
             <div class="cart-item-title">
               ${escapeHtml(item.title)}
@@ -3759,12 +3782,12 @@ function loadReviews() {
   const track = document.getElementById('reviewsTrack');
   if (!track) return;
 
-  const reviewImages = Array.from({ length: 6 }, (_, index) => `./images/otz/${index + 1}.jpg`);
+  const reviewImages = Array.from({ length: 6 }, (_, index) => `./images/otz/${index + 1}.webp`);
 
   track.innerHTML = reviewImages.map((src, index) => `
     <img src="${src}" alt="Отзыв клиента ${index + 1}" loading="lazy" decoding="async"
          onclick="openLightbox('${src}', 'Отзыв клиента ${index + 1}')"
-         onerror="this.remove()">
+         onerror="imageFallback(this)">
   `).join('');
 }
 
@@ -3784,7 +3807,7 @@ function openReviewPrompt() {
 const DEFAULT_SEO = {
   title: 'PF Store — электроника с проверкой перед покупкой',
   description: 'PF Store — часы, наушники, очки и аксессуары. Гарантия 14 дней, проверка товара перед покупкой, бесплатная доставка по Барнаулу и отправка по всей России.',
-  image: './images/banner.jpg'
+  image: './images/og-cover.jpg'
 };
 
 function absoluteUrl(path) {
@@ -4662,5 +4685,6 @@ Object.assign(window, {
   closeModal,
   updateQty,
   removePromo,
-  resetAllFilters
+  resetAllFilters,
+  imageFallback
 });

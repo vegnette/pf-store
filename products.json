@@ -10,10 +10,10 @@
     "page": "watch.html",
     "desc_file": "./images/Watch 11/1.txt",
     "images": [
-      "./images/Watch 11/1.jpg", "./images/Watch 11/2.jpg", "./images/Watch 11/3.jpg",
-      "./images/Watch 11/4.jpg", "./images/Watch 11/5.jpg", "./images/Watch 11/6.jpg"
+      "./images/Watch 11/1.webp", "./images/Watch 11/2.webp", "./images/Watch 11/3.webp",
+      "./images/Watch 11/4.webp", "./images/Watch 11/5.webp", "./images/Watch 11/6.webp"
     ],
-    "gift_images": ["./images/Watch 11/gift.jpg"],
+    "gift_images": ["./images/Watch 11/gift.webp"],
     "gift_short": "Ремешок в подарок",
     "gift_desc": "🎁 Ремешок Миланское плетение в подарок при покупке часов!"
   },
@@ -28,10 +28,10 @@
     "page": "airpods-pro-3.html",
     "desc_file": "./images/Pro3/1.txt",
     "images": [
-      "./images/Pro3/1.jpg", "./images/Pro3/2.jpg", "./images/Pro3/3.jpg",
-      "./images/Pro3/4.jpg", "./images/Pro3/5.jpg", "./images/Pro3/6.jpg"
+      "./images/Pro3/1.webp", "./images/Pro3/2.webp", "./images/Pro3/3.webp",
+      "./images/Pro3/4.webp", "./images/Pro3/5.webp", "./images/Pro3/6.webp"
     ],
-    "gift_images": ["./images/4/gift.jpg"],
+    "gift_images": ["./images/4/gift.webp"],
     "gift_short": "Кабель 60W в подарок",
     "gift_desc": "🎁 Кабель 60W в подарок к наушникам!"
   },
@@ -46,10 +46,10 @@
     "page": "airpods-4.html",
     "desc_file": "./images/4/1.txt",
     "images": [
-      "./images/4/1.jpg", "./images/4/2.jpg", "./images/4/3.jpg",
-      "./images/4/4.jpg", "./images/4/5.jpg", "./images/4/6.jpg"
+      "./images/4/1.webp", "./images/4/2.webp", "./images/4/3.webp",
+      "./images/4/4.webp", "./images/4/5.webp", "./images/4/6.webp"
     ],
-    "gift_images": ["./images/4/gift.jpg"],
+    "gift_images": ["./images/4/gift.webp"],
     "gift_short": "Кабель 60W в подарок",
     "gift_desc": "🎁 Кабель 60W в подарок к наушникам!"
   },
@@ -64,10 +64,10 @@
     "page": "airpods-pro-2.html",
     "desc_file": "./images/Pro2/1.txt",
     "images": [
-      "./images/Pro2/1.jpg", "./images/Pro2/2.jpg", "./images/Pro2/3.jpg",
-      "./images/Pro2/4.jpg", "./images/Pro2/5.jpg", "./images/Pro2/6.jpg"
+      "./images/Pro2/1.webp", "./images/Pro2/2.webp", "./images/Pro2/3.webp",
+      "./images/Pro2/4.webp", "./images/Pro2/5.webp", "./images/Pro2/6.webp"
     ],
-    "gift_images": ["./images/4/gift.jpg"],
+    "gift_images": ["./images/4/gift.webp"],
     "gift_short": "Кабель 60W в подарок",
     "gift_desc": "🎁 Кабель 60W в подарок к наушникам!"
   },
@@ -82,8 +82,8 @@
     "page": "ray-ban.html",
     "desc_file": "./images/RayBan/1.txt",
     "images": [
-      "./images/RayBan/1.jpg", "./images/RayBan/2.jpg", "./images/RayBan/3.jpg",
-      "./images/RayBan/4.jpg", "./images/RayBan/5.jpg", "./images/RayBan/6.jpg"
+      "./images/RayBan/1.webp", "./images/RayBan/2.webp", "./images/RayBan/3.webp",
+      "./images/RayBan/4.webp", "./images/RayBan/5.webp", "./images/RayBan/6.webp"
     ]
   }
 ]

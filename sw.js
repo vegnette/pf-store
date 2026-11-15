@@ -1,11 +1,12 @@
 /* PF Store service worker: офлайн-оболочка + свежие файлы при сети */
-const CACHE_NAME = 'pf-store-v15';
+const CACHE_NAME = 'pf-store-v16';
 
 const PRECACHE = [
   './',
   './index.html',
   './style.css',
   './script.js',
+  './products.json',
   './manifest.webmanifest',
   './images/favicon.png',
   './images/icon-192.png',
@@ -52,6 +53,33 @@ async function networkFirst(request, fallbackUrl) {
   }
 }
 
+// Отдаём закешированную версию сразу, а свежую кладём в кеш для следующего раза.
+// Так каталог и скрипты не «залипают» после обновления сайта.
+async function staleWhileRevalidate(request) {
+  const cache = await caches.open(CACHE_NAME);
+  const cached = await cache.match(request);
+
+  const network = fetch(request)
+    .then(response => {
+      if (response && response.ok) cache.put(request, response.clone());
+      return response;
+    })
+    .catch(() => null);
+
+  if (cached) {
+    network.catch(() => {});
+    return cached;
+  }
+
+  const response = await network;
+  if (response) return response;
+
+  return new Response('Нет соединения. Откройте PF Store снова, когда появится интернет.', {
+    status: 503,
+    headers: { 'Content-Type': 'text/plain; charset=utf-8' }
+  });
+}
+
 async function cacheFirst(request) {
   const cache = await caches.open(CACHE_NAME);
   const cached = await cache.match(request);
@@ -80,6 +108,14 @@ self.addEventListener('fetch', event => {
 
   if (['image', 'font'].includes(request.destination)) {
     event.respondWith(cacheFirst(request));
+    return;
+  }
+
+  const isStaticAsset = ['script', 'style'].includes(request.destination)
+    || /\.(json|webmanifest)$/i.test(url.pathname);
+
+  if (isStaticAsset) {
+    event.respondWith(staleWhileRevalidate(request));
     return;
   }
 
