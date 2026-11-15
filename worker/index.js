@@ -34,6 +34,21 @@ const STATUS_ALIASES = {
   sent: 'manager',
   delivered: 'received'
 };
+const ORDER_STATUS_LABELS = {
+  created: 'создан',
+  manager: 'у менеджера',
+  delivery: 'в доставке',
+  received: 'получен',
+  canceled: 'отменён'
+};
+
+// Базовые цены для проверки заказов. Если цена меняется через панель
+// менеджера, она сохраняется в product:<id> и имеет приоритет над этой картой.
+// При изменении products.json обновите значения здесь и задеплойте Worker.
+const BASE_PRICES = { 1: 1500, 2: 1800, 3: 1500, 4: 1800, 5: 4500 };
+
+// Защита от спама: один новый заказ на покупателя за 90 секунд.
+const NEW_ORDER_COOLDOWN_MS = 90 * 1000;
 
 function normalizeStatus(status) {
   const next = STATUS_ALIASES[status] || status;
@@ -176,17 +191,153 @@ async function sendTelegram(env, token, chatId, text, replyMarkup) {
   }
 }
 
-// Уведомления менеджеру идут от основного бота магазина, если он подключён.
+// Уведомления менеджеру и покупателю идут от основного бота магазина.
 function managerToken(env) {
   return env.BOT_TOKEN_MAIN || env.BOT_TOKEN;
 }
 
+// Универсальный вызов Telegram Bot API для callback-кнопок и редактирования.
+async function telegramMethod(env, token, method, payload) {
+  if (!token) return null;
+
+  try {
+    const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await response.json().catch(() => null);
+
+    if (!response.ok || !data?.ok) {
+      console.error(`telegram_${method}_failed`, response.status, data?.description || 'unknown');
+      return null;
+    }
+
+    return data.result || true;
+  } catch (error) {
+    console.error(`telegram_${method}_error`, error.message);
+    return null;
+  }
+}
+
+function answerCallback(env, token, callbackId, text, showAlert = false) {
+  return telegramMethod(env, token, 'answerCallbackQuery', {
+    callback_query_id: callbackId,
+    text,
+    show_alert: showAlert
+  });
+}
+
+function editTelegramMessage(env, token, chatId, messageId, text, replyMarkup) {
+  if (!chatId || !messageId) return Promise.resolve(null);
+  return telegramMethod(env, token, 'editMessageText', {
+    chat_id: chatId,
+    message_id: messageId,
+    text,
+    disable_web_page_preview: true,
+    ...(replyMarkup ? { reply_markup: replyMarkup } : {})
+  });
+}
+
+// Кнопки, которые менеджер видит прямо под уведомлением о заказе.
+function orderActionKeyboard(order) {
+  const status = normalizeStatus(order.status);
+  const next = {
+    created: ['manager', '✅ Принять'],
+    manager: ['delivery', '🚚 В доставку'],
+    delivery: ['received', '📦 Получен']
+  }[status];
+
+  const rows = [];
+  if (next) {
+    rows.push([{
+      text: next[1],
+      callback_data: `order:${next[0]}:${order.id}`
+    }]);
+  }
+  if (status !== 'canceled' && status !== 'received') {
+    rows.push([{
+      text: '❌ Отменить',
+      callback_data: `order:canceled:${order.id}`
+    }]);
+  }
+  rows.push([{ text: '🛍 Все заказы', web_app: { url: `${STORE_URL}?view=orders` } }]);
+
+  return { inline_keyboard: rows };
+}
+
+// Покупатель получает сообщение при каждом изменении статуса заказа.
+async function notifyBuyer(env, order, status) {
+  const chatId = order?.user?.id;
+  const next = normalizeStatus(status);
+  if (!chatId) return false;
+
+  const messages = {
+    manager: [
+      `✅ Заказ ${order.id} принят`,
+      'Менеджер проверит наличие и напишет вам в Telegram.'
+    ],
+    delivery: [
+      `🚚 Заказ ${order.id} передан в доставку`,
+      'Скоро свяжемся, чтобы согласовать время и способ получения.'
+    ],
+    received: [
+      `📦 Заказ ${order.id} получен`,
+      'Спасибо за покупку! Если что-то понадобится — напишите менеджеру.'
+    ],
+    canceled: [
+      `❌ Заказ ${order.id} отменён`,
+      `Если это ошибка, напишите @${MANAGER_USERNAME}.`
+    ]
+  };
+
+  const message = messages[next];
+  if (!message) return false;
+
+  const text = [
+    ...message,
+    '',
+    `Сумма: ${formatMoney(order.total)}`,
+    'Статус всегда доступен в магазине.'
+  ].join('\n');
+
+  return sendTelegram(env, managerToken(env), chatId, text, {
+    inline_keyboard: [[{ text: '📦 Мои заказы', web_app: { url: `${STORE_URL}?view=orders` } }]]
+  });
+}
+
+// Единая точка изменения статуса: даты и служебные поля не расходятся
+// между сайтом, Telegram-кнопками и API.
+function applyOrderStatus(order, status, by = 'manager') {
+  const previous = normalizeStatus(order.status);
+  const next = normalizeStatus(status);
+  const now = new Date().toISOString();
+
+  order.status = next;
+  order.updatedAt = now;
+  order.updatedBy = by;
+
+  if ((next === 'manager' || next === 'delivery' || next === 'received') && !order.confirmedAt) {
+    order.confirmedAt = now;
+  }
+  if (next === 'delivery' && !order.shippedAt) order.shippedAt = now;
+  if (next === 'received') {
+    if (!order.deliveredAt) order.deliveredAt = now;
+    if (!order.receivedAt) order.receivedAt = now;
+  }
+
+  return previous;
+}
+
+
 async function notifyManager(env, order) {
-  if (!env.MANAGER_CHAT_ID || !env.BOT_TOKEN) return;
+  const token = managerToken(env);
+  const chatId = env.MANAGER_CHAT_ID || managerIds(env)[0];
+  if (!token || !chatId) return false;
 
   const lines = [
     `🛒 Новый заказ ${order.id}`,
-    `Сумма: ${order.total} ₽`,
+    `Сумма: ${formatMoney(order.total)}`,
     ...order.items.map(item => `• ${item.title} × ${item.qty}`)
   ];
 
@@ -210,13 +361,23 @@ async function notifyManager(env, order) {
     if (order.delivery.comment) lines.push(`Комментарий: ${order.delivery.comment}`);
   }
 
-  await sendTelegram(env, managerToken(env), env.MANAGER_CHAT_ID, lines.join('\n'));
+  if (order.priceMismatch) {
+    lines.push('');
+    lines.push(`⚠️ Сумма проверена: на сайте ${formatMoney(order.priceMismatch.receivedTotal)}, по каталогу ${formatMoney(order.priceMismatch.expectedTotal)}.`);
+    lines.push('Сверьте цену перед подтверждением.');
+  }
+
+  return sendTelegram(env, token, chatId, lines.join('\n'), orderActionKeyboard(order));
 }
 
-// --- НАЛИЧИЕ ---
+// --- НАЛИЧИЕ И РУЧНЫЕ ПРАВКИ ТОВАРОВ ---
 
 function stockKey(productId) {
   return `stock:${productId}`;
+}
+
+function productKey(productId) {
+  return `product:${productId}`;
 }
 
 async function getStockOverrides(env) {
@@ -226,6 +387,15 @@ async function getStockOverrides(env) {
   );
 
   return Object.fromEntries(values.filter(([, value]) => Number.isFinite(value)));
+}
+
+async function getProductOverrides(env) {
+  const list = await env.ORDERS_KV.list({ prefix: 'product:' });
+  const values = await Promise.all(
+    list.keys.map(async key => [key.name.slice(8), await env.ORDERS_KV.get(key.name, 'json')])
+  );
+
+  return Object.fromEntries(values.filter(([, value]) => value && typeof value === 'object'));
 }
 
 async function notifyWatchers(env, productId, title, price) {
@@ -318,7 +488,123 @@ async function sendDailyReport(env) {
   await sendTelegram(env, managerToken(env), env.MANAGER_CHAT_ID, lines.join('\n'));
 }
 
+// --- ПРОВЕРКА ЦЕН И АНТИСПАМ ---
+
+async function validateOrderPricing(env, order) {
+  const overrides = await getProductOverrides(env);
+  let subtotal = 0;
+  let mismatch = false;
+  let hasQtyDiscount = false;
+
+  order.items = order.items.map(item => {
+    const id = String(item.id);
+    const qty = Math.max(1, Math.min(999, Math.round(Number(item.qty) || 1)));
+    const clientPrice = Math.round(Number(item.price) || 0);
+    const override = overrides[id];
+    const expected = override && Number.isFinite(Number(override.price))
+      ? Number(override.price)
+      : BASE_PRICES[id];
+
+    if (!Number.isFinite(expected)) {
+      subtotal += clientPrice * qty;
+      return { ...item, qty };
+    }
+
+    if (Math.abs(clientPrice - expected) > 0.5) mismatch = true;
+    if (qty >= 2) hasQtyDiscount = true;
+    subtotal += expected * qty;
+    return { ...item, qty, price: expected };
+  });
+
+  const qtyDiscount = hasQtyDiscount ? Math.round(subtotal * 0.05) : 0;
+  const promoPercent = Math.max(0, Math.min(5, Number(order.promoPercent) || 0));
+  const promoDiscount = Math.round(subtotal * promoPercent / 100);
+  const total = Math.max(0, subtotal - qtyDiscount - promoDiscount);
+
+  if (Math.abs((Number(order.total) || 0) - total) > 1) mismatch = true;
+
+  return { subtotal, qtyDiscount, promoDiscount, total, mismatch };
+}
+
+async function orderRateLimit(env, userId, orderId) {
+  const key = `rate:${userId}`;
+  const now = Date.now();
+  const last = await env.ORDERS_KV.get(key, 'json');
+  const elapsed = last ? now - Number(last.at || 0) : Infinity;
+
+  if (last && elapsed < NEW_ORDER_COOLDOWN_MS && String(last.orderId) !== String(orderId)) {
+    return Math.ceil((NEW_ORDER_COOLDOWN_MS - elapsed) / 1000);
+  }
+
+  await env.ORDERS_KV.put(
+    key,
+    JSON.stringify({ at: now, orderId: String(orderId) }),
+    { expirationTtl: 180 }
+  );
+
+  return 0;
+}
+
+async function handleCallbackQuery(env, query) {
+  const token = managerToken(env);
+  const from = query.from || {};
+  const data = String(query.data || '');
+  const parts = data.split(':');
+  const prefix = parts[0];
+  const nextStatus = parts[1];
+  const orderId = parts.slice(2).join(':');
+
+  if (prefix !== 'order' || !orderId) {
+    await answerCallback(env, token, query.id, 'Неизвестная команда', true);
+    return;
+  }
+
+  if (!isManager(from, env)) {
+    await answerCallback(env, token, query.id, 'Нет прав менеджера', true);
+    return;
+  }
+
+  const order = await getOrder(env, orderId);
+  if (!order) {
+    await answerCallback(env, token, query.id, 'Заказ не найден', true);
+    return;
+  }
+
+  const status = STATUS_ALIASES[nextStatus] || nextStatus;
+  if (!ORDER_STATUSES.includes(status)) {
+    await answerCallback(env, token, query.id, 'Неизвестный статус', true);
+    return;
+  }
+
+  if (normalizeStatus(order.status) === status) {
+    await answerCallback(env, token, query.id, `Уже ${ORDER_STATUS_LABELS[status]}`);
+    return;
+  }
+
+  applyOrderStatus(order, status, from.username || from.first_name || 'manager');
+  await putOrder(env, order);
+  await answerCallback(env, token, query.id, `Статус: ${ORDER_STATUS_LABELS[status]}`);
+  await notifyBuyer(env, order, status);
+
+  const marker = '\n\n──────────\n';
+  const baseText = String(query.message?.text || `Заказ ${order.id}`);
+  const text = `${baseText.split(marker)[0]}${marker}Статус: ${ORDER_STATUS_LABELS[status].toUpperCase()}`;
+  await editTelegramMessage(
+    env,
+    token,
+    query.message?.chat?.id,
+    query.message?.message_id,
+    text,
+    orderActionKeyboard(order)
+  );
+}
+
 async function handleTelegramUpdate(env, update) {
+  if (update.callback_query) {
+    await handleCallbackQuery(env, update.callback_query);
+    return;
+  }
+
   const message = update.message || update.edited_message;
   if (!message || !message.chat?.id) return;
 
@@ -386,9 +672,11 @@ export default {
       return json({ ok: true });
     }
 
-    // Публичный список изменений наличия (что менеджер поменял вручную).
-    if (url.pathname === '/stock' && request.method === 'GET') {
-      return json({ stock: await getStockOverrides(env) });
+    // Публичные ручные правки: наличие, цена и описание товаров.
+    if ((url.pathname === '/stock' || url.pathname === '/overrides') && request.method === 'GET') {
+      const stock = await getStockOverrides(env);
+      if (url.pathname === '/stock') return json({ stock });
+      return json({ stock, products: await getProductOverrides(env) });
     }
 
     // Ручной запуск дневного отчёта (ключ задаётся секретом REPORT_KEY).
@@ -472,6 +760,46 @@ export default {
       return json({ stock, notified });
     }
 
+    // Ручная правка цены, старой цены, наличия и описания товара.
+    if (body.type === 'product') {
+      if (!manager) return json({ error: 'manager_only' }, 403);
+
+      const productId = String(body.productId || '').trim();
+      const price = Math.round(Number(body.price));
+      const oldPrice = Math.round(Number(body.oldPrice) || 0);
+      const stock = Math.max(0, Math.min(999, Math.round(Number(body.stock) || 0)));
+      const desc = String(body.desc || '').trim().slice(0, 4000);
+      const previousStock = Number(body.previousStock);
+
+      if (!productId) return json({ error: 'invalid_product' }, 400);
+      if (!Number.isFinite(price) || price <= 0 || price > 1000000) {
+        return json({ error: 'invalid_price' }, 400);
+      }
+      if (!Number.isFinite(oldPrice) || oldPrice < 0 || oldPrice > 1000000) {
+        return json({ error: 'invalid_old_price' }, 400);
+      }
+
+      const now = new Date().toISOString();
+      const product = {
+        price,
+        oldPrice,
+        desc,
+        updatedAt: now,
+        updatedBy: user.username || user.first_name || 'manager'
+      };
+
+      await env.ORDERS_KV.put(productKey(productId), JSON.stringify(product));
+      await env.ORDERS_KV.put(stockKey(productId), String(stock));
+
+      // Подписчиков беспокоим только если товар реально вернулся в наличие.
+      const backInStock = stock > 0 && Number.isFinite(previousStock) && previousStock <= 0;
+      const notified = backInStock
+        ? await notifyWatchers(env, productId, String(body.title || ''), price)
+        : 0;
+
+      return json({ product: { ...product, stock }, notified });
+    }
+
     // Смена статуса менеджером
     if (body.type === 'status') {
       if (!manager) return json({ error: 'manager_only' }, 403);
@@ -479,24 +807,13 @@ export default {
       const order = await getOrder(env, body.id);
       if (!order) return json({ error: 'not_found' }, 404);
 
-      const status = normalizeStatus(body.status);
+      const status = STATUS_ALIASES[body.status] || body.status;
       if (!ORDER_STATUSES.includes(status)) return json({ error: 'bad_status' }, 400);
+      if (normalizeStatus(order.status) === status) return json({ order });
 
-      order.status = status;
-      order.updatedAt = new Date().toISOString();
-      order.updatedBy = user.username || user.first_name || 'manager';
-      if (status === 'manager' && !order.confirmedAt) order.confirmedAt = order.updatedAt;
-      if (status === 'delivery') {
-        if (!order.confirmedAt) order.confirmedAt = order.updatedAt;
-        order.shippedAt = order.updatedAt;
-      }
-      if (status === 'received') {
-        if (!order.confirmedAt) order.confirmedAt = order.updatedAt;
-        order.deliveredAt = order.updatedAt;
-        order.receivedAt = order.updatedAt;
-      }
-
+      applyOrderStatus(order, status, user.username || user.first_name || 'manager');
       await putOrder(env, order);
+      await notifyBuyer(env, order, status);
       return json({ order });
     }
 
@@ -529,8 +846,23 @@ export default {
     }
 
     const existing = await getOrder(env, order.id);
-    if (existing && !manager && String(existing.user?.id) !== String(user.id)) {
-      return json({ error: 'forbidden' }, 403);
+    if (existing && !manager) {
+      if (String(existing.user?.id) !== String(user.id)) {
+        return json({ error: 'forbidden' }, 403);
+      }
+      // После того как менеджер принял заказ, покупатель его не редактирует.
+      if (normalizeStatus(existing.status) !== 'created') {
+        return json({ error: 'order_locked' }, 409);
+      }
+    }
+
+    const isNew = !existing;
+
+    if (!manager && isNew) {
+      const retryAfter = await orderRateLimit(env, user.id, order.id);
+      if (retryAfter > 0) {
+        return json({ error: 'too_fast', retryAfter }, 429);
+      }
     }
 
     if (!manager) {
@@ -543,11 +875,25 @@ export default {
         }
       }
       order.status = existing ? nextStatus : 'created';
+
+      // Цены и итог проверяем по каталогу и ручным правкам менеджера.
+      const pricing = await validateOrderPricing(env, order);
+      const receivedTotal = Number(order.total) || 0;
+      order.subtotal = pricing.subtotal;
+      order.qtyDiscount = pricing.qtyDiscount;
+      order.promoDiscount = pricing.promoDiscount;
+      order.total = pricing.total;
+      if (pricing.mismatch) {
+        order.priceMismatch = {
+          expectedTotal: pricing.total,
+          receivedTotal,
+          at: new Date().toISOString()
+        };
+      }
     } else {
       order.status = normalizeStatus(order.status);
     }
 
-    const isNew = !existing;
     await putOrder(env, order);
 
     if (isNew && !manager && !isTestOrder(order)) {
