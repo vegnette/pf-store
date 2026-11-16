@@ -855,6 +855,15 @@ function applyProductOverrides() {
     const override = productOverrides[id];
     if (!override || typeof override !== 'object') return;
 
+    if (typeof override.title === 'string') {
+      const title = override.title.trim();
+      if (title && title !== product.title) {
+        product.title = title;
+        product.titleOverridden = true;
+        changed = true;
+      }
+    }
+
     if (Number.isFinite(Number(override.price)) && Number(override.price) > 0) {
       product.price = Number(override.price);
       changed = true;
@@ -898,12 +907,14 @@ function refreshOpenProductView() {
   const modal = document.getElementById('productModal');
   if (!product || !modal?.classList.contains('active')) return;
 
+  const title = document.getElementById('productTitle');
   const price = document.getElementById('productPrice');
   const oldPrice = document.getElementById('productOldPrice');
   const buyBarPrice = document.getElementById('buyBarPrice');
   const buyBarOldPrice = document.getElementById('buyBarOldPrice');
   const desc = document.getElementById('productDesc');
 
+  if (title) title.textContent = product.title;
   if (price) price.textContent = formatPrice(product.price);
   if (oldPrice) {
     oldPrice.textContent = product.oldPrice && product.oldPrice > product.price
@@ -3247,6 +3258,12 @@ function renderEditList() {
           </div>
         </div>
 
+        <label class="edit-field edit-field--title">
+          <span>НАЗВАНИЕ</span>
+          <input type="text" maxlength="120" data-edit-field="title"
+                 value="${escapeHtml(product.title)}" placeholder="Название товара">
+        </label>
+
         <div class="edit-grid">
           <label class="edit-field">
             <span>ЦЕНА, ₽</span>
@@ -3312,7 +3329,6 @@ async function saveProductData(product, payload) {
       body: JSON.stringify({
         type: 'product',
         productId: String(product.id),
-        title: product.title,
         initData,
         ...payload
       })
@@ -3322,6 +3338,7 @@ async function saveProductData(product, payload) {
     if (!response.ok) {
       const messages = {
         manager_only: 'Нет прав менеджера',
+        invalid_title: 'Название: от 2 до 120 символов',
         invalid_price: 'Проверьте цену',
         invalid_old_price: 'Проверьте старую цену',
         invalid_product: 'Товар не найден'
@@ -3344,16 +3361,24 @@ async function saveProductFromEditCard(button) {
   const product = products.find(item => String(item.id) === card.dataset.editId);
   if (!product) return;
 
+  const titleInput = card.querySelector('[data-edit-field="title"]');
   const priceInput = card.querySelector('[data-edit-field="price"]');
   const oldPriceInput = card.querySelector('[data-edit-field="oldPrice"]');
   const stockInput = card.querySelector('[data-edit-field="stock"]');
   const descInput = card.querySelector('[data-edit-field="desc"]');
   const statusEl = card.querySelector('[data-edit-status]');
 
+  const title = String(titleInput?.value || '').replace(/\s+/g, ' ').trim().slice(0, 120);
   const price = Math.round(Number(priceInput?.value));
   const oldPrice = Math.max(0, Math.round(Number(oldPriceInput?.value) || 0));
   const stock = Math.max(0, Math.min(999, Math.round(Number(stockInput?.value) || 0)));
   const desc = String(descInput?.value || '').trim().slice(0, 4000);
+
+  if (title.length < 2) {
+    showToast('Название: минимум 2 символа', 'error');
+    titleInput?.focus();
+    return;
+  }
 
   if (!Number.isFinite(price) || price <= 0) {
     showToast('Цена должна быть больше нуля', 'error');
@@ -3372,12 +3397,13 @@ async function saveProductFromEditCard(button) {
   button.textContent = 'СОХРАНЯЮ…';
   if (statusEl) statusEl.textContent = '';
 
-  const data = await saveProductData(product, { price, oldPrice, stock, desc, previousStock });
+  const data = await saveProductData(product, { title, price, oldPrice, stock, desc, previousStock });
 
   button.disabled = false;
   button.textContent = 'СОХРАНИТЬ';
   if (!data) return;
 
+  product.title = title;
   product.price = price;
   product.oldPrice = oldPrice;
   product.stock = stock;
@@ -3389,8 +3415,11 @@ async function saveProductFromEditCard(button) {
     delete product.descOverridden;
   }
 
-  productOverrides[String(product.id)] = { price, oldPrice, desc };
+  productOverrides[String(product.id)] = { title, price, oldPrice, desc };
   stockOverrides[String(product.id)] = stock;
+
+  const cardTitle = card.querySelector('.edit-card-title');
+  if (cardTitle) cardTitle.textContent = title;
 
   const meta = card.querySelector('[data-edit-meta]');
   if (meta) {

@@ -61,19 +61,21 @@ Telegram присылает его только с заголовком `x-teleg
 
 ## Наличие, товары и подписки
 
-- `GET /overrides` — публичные ручные правки: `{"stock":{"2":3},"products":{"2":{"price":1900,"oldPrice":3000,"desc":"…"}}}`.
+- `GET /overrides` — публичные ручные правки: `{"stock":{"2":3},"products":{"2":{"title":"Новое имя","price":1900,"oldPrice":3000,"desc":"…"}}}`.
 - `GET /stock` — только наличие, оставлен для старых версий сайта.
 - `POST /` `{ type:'stock', productId, stock, title, price, initData }` — менеджер
   меняет наличие. Если `stock > 0`, всем подписчикам уходит сообщение.
-- `POST /` `{ type:'product', productId, price, oldPrice, stock, desc, previousStock, title, initData }` —
-  менеджер меняет цену, старую цену, наличие и описание. Если товар вернулся
+- `POST /` `{ type:'product', productId, title, price, oldPrice, stock, desc, previousStock, initData }` —
+  менеджер меняет название (2–120 символов, иначе `400 invalid_title`), цену,
+  старую цену, наличие и описание. Если товар вернулся
   в наличие (`previousStock <= 0`, новый `stock > 0`), подписчики получают сообщение.
 - `POST /` `{ type:'watch', productId, initData }` — покупатель подписывается
   на поступление. `canNotify:false` значит, что бот не смог написать:
   человек не нажал `/start` у основного бота.
 
 Подписки хранятся в KV с префиксом `watch:<товар>:<id>`, изменения наличия —
-`stock:<товар>`, ручные правки товара — `product:<товар>`. Подписка удаляется
+`stock:<товар>`, ручные правки товара — `product:<товар>` в виде
+`{"title","price","oldPrice","desc","updatedAt","updatedBy"}`. Подписка удаляется
 после успешного уведомления. Наличие в `product:<товар>` дублируется, чтобы
 одна карточка в панели менеджера сохранялась одним запросом.
 
@@ -176,10 +178,10 @@ const TELEGRAM_BOT_USERNAME = 'имя_вашего_бота';
 Задеплойте сайт заново. Готово:
 
 - `GET  /?initData=...` — список заказов (свои или все для менеджера);
-- `GET  /overrides` — публичные правки наличия, цены и описания;
+- `GET  /overrides` — публичные правки названия, наличия, цены и описания;
 - `POST /` `{ type: 'order', order, initData }` — создать/обновить заказ;
 - `POST /` `{ type: 'status', id, status, initData }` — статус (только менеджер);
-- `POST /` `{ type: 'product', productId, price, oldPrice, stock, desc, initData }` —
+- `POST /` `{ type: 'product', productId, title, price, oldPrice, stock, desc, initData }` —
   правка товара (только менеджер);
 - `POST /` `{ type: 'delete', id, initData }` — удалить тестовый заказ (только менеджер).
 

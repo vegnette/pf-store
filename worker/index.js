@@ -760,11 +760,12 @@ export default {
       return json({ stock, notified });
     }
 
-    // Ручная правка цены, старой цены, наличия и описания товара.
+    // Ручная правка названия, цены, старой цены, наличия и описания товара.
     if (body.type === 'product') {
       if (!manager) return json({ error: 'manager_only' }, 403);
 
       const productId = String(body.productId || '').trim();
+      const title = String(body.title || '').replace(/\s+/g, ' ').trim().slice(0, 120);
       const price = Math.round(Number(body.price));
       const oldPrice = Math.round(Number(body.oldPrice) || 0);
       const stock = Math.max(0, Math.min(999, Math.round(Number(body.stock) || 0)));
@@ -772,6 +773,7 @@ export default {
       const previousStock = Number(body.previousStock);
 
       if (!productId) return json({ error: 'invalid_product' }, 400);
+      if (title.length < 2) return json({ error: 'invalid_title' }, 400);
       if (!Number.isFinite(price) || price <= 0 || price > 1000000) {
         return json({ error: 'invalid_price' }, 400);
       }
@@ -781,6 +783,7 @@ export default {
 
       const now = new Date().toISOString();
       const product = {
+        title,
         price,
         oldPrice,
         desc,
@@ -794,7 +797,7 @@ export default {
       // Подписчиков беспокоим только если товар реально вернулся в наличие.
       const backInStock = stock > 0 && Number.isFinite(previousStock) && previousStock <= 0;
       const notified = backInStock
-        ? await notifyWatchers(env, productId, String(body.title || ''), price)
+        ? await notifyWatchers(env, productId, title, price)
         : 0;
 
       return json({ product: { ...product, stock }, notified });

@@ -2203,6 +2203,10 @@ textarea:focus-visible,
 
 .edit-field--wide { margin-bottom: 12px; }
 
+.edit-field--title { margin-bottom: 10px; }
+
+.edit-field--title input { text-align: left; }
+
 .edit-actions {
   display: flex;
   align-items: center;
