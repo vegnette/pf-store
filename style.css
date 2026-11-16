@@ -2207,6 +2207,28 @@ textarea:focus-visible,
 
 .edit-field--title input { text-align: left; }
 
+/* На телефоне поля не должны вызывать авто-зум в Safari/Telegram (шрифт ≥16px),
+   а кнопка сохранения — занимать всю ширину и легко попадать пальцем. */
+@media (max-width: 480px) {
+  .edit-field input,
+  .edit-field textarea {
+    font-size: 16px;
+  }
+
+  .edit-field textarea {
+    line-height: 1.45;
+  }
+
+  .edit-actions {
+    flex-wrap: wrap;
+  }
+
+  .edit-save {
+    width: 100%;
+    padding: 14px 20px;
+  }
+}
+
 .edit-actions {
   display: flex;
   align-items: center;

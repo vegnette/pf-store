@@ -3260,8 +3260,9 @@ function renderEditList() {
 
         <label class="edit-field edit-field--title">
           <span>НАЗВАНИЕ</span>
-          <input type="text" maxlength="120" data-edit-field="title"
-                 value="${escapeHtml(product.title)}" placeholder="Название товара">
+          <input type="text" maxlength="120" data-edit-field="title" enterkeyhint="done"
+                 autocapitalize="sentences" value="${escapeHtml(product.title)}"
+                 placeholder="Название товара">
         </label>
 
         <div class="edit-grid">
