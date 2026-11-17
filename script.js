@@ -261,6 +261,7 @@ function saveFavorites() {
   } catch (error) {
     console.warn('Не удалось сохранить избранное:', error);
   }
+  syncFavoritesToWorker();
 }
 
 function isFavorite(id) {
@@ -540,6 +541,73 @@ function sendFavoritesToManager() {
   triggerHaptic('success');
 }
 
+// «Оформить всё»: добавляем доступные товары из избранного в корзину
+// и сразу открываем оформление. Нет в наличии — пропускаем с пояснением.
+function checkoutAllFavorites() {
+  const items = getFavoriteProducts();
+  if (!items.length) {
+    showToast('В избранном пока пусто', 'error');
+    return;
+  }
+
+  let added = 0;
+  let unavailable = 0;
+
+  items.forEach(product => {
+    const stock = Number(product.stock) || 0;
+    if (stock <= 0) {
+      unavailable += 1;
+      return;
+    }
+
+    const existing = cart.find(item => Number(item.id) === Number(product.id));
+    if (existing) {
+      existing.qty = Math.min(stock, Number(existing.qty || 1) + 1);
+    } else {
+      cart.push({ ...product, qty: 1 });
+    }
+    added += 1;
+  });
+
+  if (!added) {
+    showToast('Этих товаров сейчас нет в наличии', 'error');
+    return;
+  }
+
+  saveCart();
+  updateUI();
+
+  if (unavailable) {
+    showToast(`${unavailable} ${plural(unavailable, 'товар', 'товара', 'товаров')} нет в наличии — добавили остальные`);
+  }
+
+  playSound('success');
+  triggerHaptic('success');
+  openCheckout();
+}
+
+// Отправляем избранное в Worker, чтобы бот мог предупредить о снижении цены.
+let favoritesSyncTimer = null;
+
+function syncFavoritesToWorker() {
+  if (!ORDERS_ENDPOINT) return;
+
+  const initData = ensureTelegramApp()?.initData || '';
+  if (!initData) return;
+
+  clearTimeout(favoritesSyncTimer);
+  favoritesSyncTimer = setTimeout(() => {
+    fetch(ORDERS_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'favorites', ids: favorites, initData }),
+      keepalive: true
+    }).catch(() => {
+      // синхронизация не должна мешать покупкам
+    });
+  }, 900);
+}
+
 function notifyManagerAboutFavorites(event, product) {
   if (!FAVORITES_ENDPOINT) return;
 
@@ -581,6 +649,8 @@ function renderFavorites() {
   const grid = document.getElementById('favoritesGrid');
   const empty = document.getElementById('favoritesEmpty');
   const actions = document.getElementById('favoritesActions');
+  const summary = document.getElementById('favoritesSummary');
+  const totalEl = document.getElementById('favoritesTotal');
   if (!grid || !empty || !actions) return;
 
   const favoriteProducts = getFavoriteProducts();
@@ -589,6 +659,12 @@ function renderFavorites() {
   actions.hidden = !hasItems;
   grid.style.display = hasItems ? 'grid' : 'none';
   empty.hidden = hasItems;
+
+  if (summary) summary.hidden = !hasItems;
+  if (totalEl) {
+    const total = favoriteProducts.reduce((sum, product) => sum + (Number(product.price) || 0), 0);
+    totalEl.textContent = formatPrice(total);
+  }
 
   if (!hasItems) {
     grid.innerHTML = '';
@@ -2019,6 +2095,139 @@ function updateOrderBadge() {
   el.classList.toggle('warn', awaiting > 0);
 }
 
+// ── Карточка клиента для менеджера ──────────────────────────
+
+function getCustomerOrders(userId) {
+  return orders
+    .filter(order => String(order.user?.id) === String(userId))
+    .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+}
+
+function renderCustomerOrderRows(list) {
+  if (!list.length) return '<div class="customer-empty">Заказов ещё не было.</div>';
+
+  return list.slice(0, 8).map(order => {
+    const status = normalizeOrderStatus(order.status);
+    return `<div class="customer-row">
+      <div class="customer-row-main">
+        <div class="customer-row-title">${escapeHtml(order.id)}${isTestOrder(order) ? ' · тест' : ''}</div>
+        <div class="customer-row-sub">${formatOrderDate(order.createdAt)}</div>
+      </div>
+      <div class="customer-row-value">${formatPrice(order.total)}</div>
+      <div class="customer-row-status">${escapeHtml(ORDER_STATUS_LABELS[status] || status)}</div>
+    </div>`;
+  }).join('');
+}
+
+function renderCustomerFavorites(ids) {
+  const list = (Array.isArray(ids) ? ids : [])
+    .map(id => products.find(product => Number(product.id) === Number(id)))
+    .filter(Boolean);
+
+  if (!list.length) {
+    return '<div class="customer-empty">Избранное пусто или ещё не синхронизировано с ботом.</div>';
+  }
+
+  return list.map(product => `<div class="customer-row">
+    <div class="customer-row-main">
+      <div class="customer-row-title">${escapeHtml(product.title)}</div>
+      <div class="customer-row-sub">${Number(product.stock) > 0 ? 'в наличии' : 'нет в наличии'}</div>
+    </div>
+    <div class="customer-row-value">${formatPrice(product.price)}</div>
+  </div>`).join('');
+}
+
+function renderCustomerMessages(messages) {
+  const list = Array.isArray(messages) ? messages.slice(-20) : [];
+  if (!list.length) return '<div class="customer-empty">Сообщений боту пока не было.</div>';
+
+  return list.map(message => {
+    const at = message.at ? new Date(message.at) : null;
+    const time = at && !Number.isNaN(at.getTime())
+      ? at.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+      : '';
+    const who = message.role === 'manager' ? 'Менеджер' : 'Клиент';
+    return `<div class="customer-message">${escapeHtml(String(message.text || ''))}<time>${who}${time ? ` · ${time}` : ''}</time></div>`;
+  }).join('');
+}
+
+async function loadCustomerCardData(userId) {
+  const initData = ensureTelegramApp()?.initData || '';
+  if (!ORDERS_ENDPOINT || !initData) return {};
+
+  try {
+    const response = await fetch(ORDERS_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'customer', userId: String(userId), initData })
+    });
+    if (!response.ok) return {};
+    return await response.json();
+  } catch (error) {
+    return {};
+  }
+}
+
+async function openCustomerCard(user) {
+  const bodyEl = document.getElementById('customerBody');
+  const subtitle = document.getElementById('customerSubtitle');
+  if (!bodyEl || !user?.id) return;
+
+  const customerOrders = getCustomerOrders(user.id);
+  const activeOrders = customerOrders.filter(order => !isTestOrder(order) && normalizeOrderStatus(order.status) !== 'canceled');
+  const total = activeOrders.reduce((sum, order) => sum + (Number(order.total) || 0), 0);
+  const name = [user.first_name, user.last_name].filter(Boolean).join(' ')
+    || (user.username ? `@${user.username}` : 'Клиент');
+  const initials = String(name).replace('@', '').trim().slice(0, 1).toUpperCase() || '?';
+
+  if (subtitle) subtitle.textContent = `ID ${user.id}${user.username ? ` · @${user.username}` : ''}`;
+
+  bodyEl.innerHTML = `
+    <div class="customer-hero">
+      <div class="customer-avatar" aria-hidden="true">${escapeHtml(initials)}</div>
+      <div>
+        <div class="customer-name">${escapeHtml(name)}</div>
+        <div class="customer-meta">${customerOrders.length
+          ? `${customerOrders.length} ${plural(customerOrders.length, 'заказ', 'заказа', 'заказов')} · ${formatPrice(total)} без отменённых`
+          : 'Заказов пока нет'}</div>
+      </div>
+    </div>
+    <div class="customer-actions">
+      ${user.username
+        ? `<a class="customer-btn customer-btn--primary" href="https://t.me/${encodeURIComponent(user.username)}" target="_blank" rel="noopener">Написать в Telegram</a>`
+        : '<span class="customer-btn">Нет @username</span>'}
+      <button type="button" class="customer-btn" data-customer-orders>Все заказы</button>
+    </div>
+    <div class="customer-stats">
+      <div class="customer-stat"><span>Заказов</span><strong>${customerOrders.length}</strong></div>
+      <div class="customer-stat"><span>Сумма</span><strong>${formatPrice(total)}</strong></div>
+    </div>
+    <section>
+      <div class="customer-section-title">История заказов</div>
+      <div class="customer-list">${renderCustomerOrderRows(customerOrders)}</div>
+    </section>
+    <section>
+      <div class="customer-section-title">Избранное</div>
+      <div class="customer-list" id="customerFavorites"><div class="customer-loading">Загружаем…</div></div>
+    </section>
+    <section>
+      <div class="customer-section-title">Переписка с ботом</div>
+      <div class="customer-messages" id="customerMessages"><div class="customer-loading">Загружаем…</div></div>
+    </section>`;
+
+  openModal('customerModal');
+  playSound('tap');
+  triggerHaptic('selection');
+
+  const data = await loadCustomerCardData(user.id);
+
+  const favoritesEl = document.getElementById('customerFavorites');
+  if (favoritesEl) favoritesEl.innerHTML = renderCustomerFavorites(data.favorites);
+
+  const messagesEl = document.getElementById('customerMessages');
+  if (messagesEl) messagesEl.innerHTML = renderCustomerMessages(data.messages);
+}
+
 function openOrders() {
   renderOrders();
   openModal('ordersModal');
@@ -2194,6 +2403,10 @@ function renderOrders() {
         <div class="order-total-row"><span>Итого</span><strong>${formatPrice(order.total)}</strong></div>
         ${renderOrderDelivery(order)}
         ${buyer ? `<div class="order-buyer">Покупатель: ${escapeHtml(buyer)}</div>` : ''}
+        ${isManager && order.user?.id ? `<button type="button" class="order-customer-btn" data-order-action="customer"
+          data-user-id="${escapeHtml(String(order.user.id))}"
+          data-user-name="${escapeHtml(order.user.first_name || '')}"
+          data-user-username="${escapeHtml(order.user.username || '')}">Карточка клиента ›</button>` : ''}
         ${renderOrderActions(order)}
       </article>`;
   }).join('') + `
@@ -2522,6 +2735,7 @@ async function loadProducts() {
     }
 
     const drops = reconcileFavoritePrices();
+    syncFavoritesToWorker();
 
     if (skeleton) skeleton.style.display = 'none';
     catalog.style.display = 'grid';
@@ -2771,6 +2985,16 @@ function buildProductCard(product, options = {}) {
           ${product.oldPrice && product.oldPrice > product.price ? `<span class="card-old-price">${formatPrice(product.oldPrice)}</span>` : ''}
         </div>
         ${stockHtml}
+        <div class="card-trust">
+          <span class="card-trust-item" title="Проверка при получении">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+            Проверка
+          </span>
+          <span class="card-trust-item" title="Гарантия 14 дней">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><polyline points="9 12 11 14 15 10"></polyline></svg>
+            14 дней
+          </span>
+        </div>
         ${giftShort
           ? `<span class="card-gift" title="${escapeHtml(giftShort)}">🎁 ${escapeHtml(giftShort)}</span>`
           : '<span class="card-gift card-gift--placeholder" aria-hidden="true"></span>'}
@@ -2796,6 +3020,55 @@ function renderCatalog() {
 
   catalog.innerHTML = filtered.map(product => buildProductCard(product, { showAdd: false })).join('');
   animateCatalogCards();
+}
+
+// «О нас»: шаги покупки ведут туда, где действие происходит.
+// Если плавный скролл недоступен (встроенный браузер, экономия движения) —
+// через мгновение переходим к цели без анимации, чтобы шаг не «не работал».
+function scrollToElement(el) {
+  if (!el) return;
+  const reduced = prefersReducedMotion();
+
+  el.scrollIntoView({ behavior: reduced ? 'auto' : 'smooth', block: 'start' });
+  if (reduced) return;
+
+  setTimeout(() => {
+    if (Math.abs(el.getBoundingClientRect().top) > 8) {
+      el.scrollIntoView({ behavior: 'auto', block: 'start' });
+    }
+  }, 420);
+}
+
+function scrollToAboutSection(id) {
+  scrollToElement(document.getElementById(id));
+}
+
+function handleAboutStep(step) {
+  playSound('tap');
+  triggerHaptic('selection');
+
+  if (step === 'catalog') {
+    setView('home');
+    setTimeout(() => {
+      scrollToElement(document.getElementById('catalog'));
+      document.getElementById('searchInput')?.focus({ preventScroll: true });
+    }, 220);
+    return;
+  }
+
+  if (step === 'manager') {
+    openTelegramLink(`https://t.me/${TELEGRAM_USERNAME}`);
+    return;
+  }
+
+  if (step === 'check') {
+    scrollToAboutSection('aboutTrust');
+    return;
+  }
+
+  if (step === 'warranty') {
+    scrollToAboutSection('aboutWarranty');
+  }
 }
 
 // «О нас»: живые счётчики категорий вместо статичных подписей
@@ -3230,6 +3503,56 @@ async function saveProductStock(product, stock) {
 // РЕЖИМ МЕНЕДЖЕРА: РЕДАКТИРОВАНИЕ КАТАЛОГА
 // ============================================================
 
+// Превью справа: как карточка выглядит для покупателя.
+let editPreviewTimer = null;
+
+function readEditCardProduct(card, product) {
+  const field = name => card.querySelector(`[data-edit-field="${name}"]`)?.value;
+  const preview = { ...product };
+
+  const title = String(field('title') || '').replace(/\s+/g, ' ').trim();
+  if (title) preview.title = title;
+
+  const price = Math.round(Number(field('price')));
+  if (Number.isFinite(price) && price > 0) preview.price = price;
+  preview.oldPrice = Math.max(0, Math.round(Number(field('oldPrice')) || 0));
+  preview.stock = Math.max(0, Math.min(999, Math.round(Number(field('stock')) || 0)));
+  preview.desc = String(field('desc') || '').trim();
+
+  return preview;
+}
+
+function renderEditPreview(product) {
+  const preview = document.getElementById('editPreview');
+  if (!preview || !window.matchMedia('(min-width: 980px)').matches) return;
+
+  if (!product) {
+    preview.innerHTML = '<div class="edit-preview-kicker">Превью</div><div class="edit-preview-note">Выберите товар, чтобы увидеть карточку.</div>';
+    return;
+  }
+
+  const desc = typeof product.desc === 'string' ? product.desc.trim() : '';
+
+  preview.innerHTML = `
+    <div class="edit-preview-kicker">Глазами покупателя</div>
+    <div class="edit-preview-title">${escapeHtml(product.title)}</div>
+    <div class="edit-preview-card">${buildProductCard(product, { showAdd: true })}</div>
+    ${desc ? `<div class="edit-preview-desc">${escapeHtml(desc)}</div>` : ''}
+    <p class="edit-preview-note">Так карточка выглядит в каталоге. Превью обновляется, пока вы правите поля.</p>`;
+}
+
+function updateEditPreview(card) {
+  if (!card) return;
+
+  const product = products.find(item => String(item.id) === card.dataset.editId);
+  if (!product) return;
+
+  clearTimeout(editPreviewTimer);
+  editPreviewTimer = setTimeout(() => {
+    renderEditPreview(readEditCardProduct(card, product));
+  }, 120);
+}
+
 function renderEditList() {
   const container = document.getElementById('editList');
   if (!container) return;
@@ -3313,6 +3636,13 @@ function renderEditList() {
         // описание останется пустым — менеджер может ввести своё
       });
   });
+
+  // По умолчанию показываем в превью первый товар.
+  const firstCard = container.querySelector('[data-edit-id]');
+  if (firstCard) {
+    const firstProduct = products.find(item => String(item.id) === firstCard.dataset.editId);
+    if (firstProduct) renderEditPreview(readEditCardProduct(firstCard, firstProduct));
+  }
 }
 
 async function saveProductData(product, payload) {
@@ -3439,6 +3769,7 @@ async function saveProductFromEditCard(button) {
   updateUI();
   updateFavoriteUI();
   refreshOpenProductView();
+  updateEditPreview(card);
 
   playSound('success');
   triggerHaptic('success');
@@ -4449,6 +4780,14 @@ function bindEvents() {
     });
   });
 
+  // «О нас» → кликабельные шаги покупки
+  document.querySelectorAll('[data-about-step]').forEach(btn => {
+    btn.addEventListener('click', () => handleAboutStep(btn.dataset.aboutStep));
+  });
+
+  // Избранное → оформить всё
+  document.getElementById('favoritesBuyBtn')?.addEventListener('click', checkoutAllFavorites);
+
   // Статус магазина: заказ можно оставить в любое время
   document.getElementById('storeStatusAction')?.addEventListener('click', () => {
     if (cart.length) {
@@ -4507,6 +4846,17 @@ function bindEvents() {
     saveProductFromEditCard(button);
   });
 
+  // Режим менеджера: превью справа обновляется при вводе
+  const editList = document.getElementById('editList');
+  editList?.addEventListener('input', event => {
+    const card = event.target.closest('[data-edit-id]');
+    if (card) updateEditPreview(card);
+  });
+  editList?.addEventListener('focusin', event => {
+    const card = event.target.closest('[data-edit-id]');
+    if (card) updateEditPreview(card);
+  });
+
   // Заказы
   document.getElementById('closeOrders')?.addEventListener('click', () => closeModal('ordersModal'));  document.getElementById('ordersBody')?.addEventListener('click', event => {
     const button = event.target.closest('[data-order-action]');
@@ -4542,9 +4892,25 @@ function bindEvents() {
       deleteTestOrder(orderId);
       return;
     }
+    if (action === 'customer') {
+      openCustomerCard({
+        id: button.dataset.userId,
+        first_name: button.dataset.userName || '',
+        username: button.dataset.userUsername || ''
+      });
+      return;
+    }
     if (action === 'manager' || action === 'delivery' || action === 'received' || action === 'canceled') {
       setOrderStatus(orderId, action);
     }
+  });
+
+  // Карточка клиента: закрытие и переход ко всем заказам
+  document.getElementById('closeCustomer')?.addEventListener('click', () => closeModal('customerModal'));
+  document.getElementById('customerBody')?.addEventListener('click', event => {
+    if (!event.target.closest('[data-customer-orders]')) return;
+    closeModal('customerModal');
+    openOrders();
   });
 
   // Карта самовывоза: iframe подключается только после нажатия

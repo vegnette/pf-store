@@ -398,6 +398,72 @@ async function getProductOverrides(env) {
   return Object.fromEntries(values.filter(([, value]) => value && typeof value === 'object'));
 }
 
+// --- ИЗБРАННОЕ, УВЕДОМЛЕНИЯ О ЦЕНЕ И КАРТОЧКА КЛИЕНТА ---
+
+function favoritesKey(userId) {
+  return `fav:${userId}`;
+}
+
+function messagesKey(userId) {
+  return `msgs:${userId}`;
+}
+
+// Пишем уведомление о снижении цены тем, у кого товар в избранном.
+async function notifyFavoriters(env, productId, title, previousPrice, nextPrice) {
+  if (!Number.isFinite(Number(previousPrice)) || Number(previousPrice) <= Number(nextPrice)) return 0;
+
+  const list = await env.ORDERS_KV.list({ prefix: 'fav:' });
+  if (!list.keys.length) return 0;
+
+  const token = managerToken(env);
+  const managers = managerIds(env);
+  const text = [
+    '📉 Цена снизилась на товар из избранного',
+    '',
+    title,
+    `Было ${formatMoney(previousPrice)} · стало ${formatMoney(nextPrice)}`
+  ].join('\n');
+  const keyboard = {
+    inline_keyboard: [[{ text: 'Открыть товар', url: `${STORE_URL}?product=${productId}` }]]
+  };
+
+  let sent = 0;
+  for (const key of list.keys) {
+    const userId = key.name.slice(4);
+    if (managers.includes(String(userId))) continue;
+
+    const record = await env.ORDERS_KV.get(key.name, 'json');
+    const ids = Array.isArray(record?.ids) ? record.ids.map(String) : [];
+    if (!ids.includes(String(productId))) continue;
+
+    if (await sendTelegram(env, token, userId, text, keyboard)) sent += 1;
+  }
+
+  return sent;
+}
+
+// Короткий журнал переписки покупателя с ботом для карточки клиента.
+async function appendCustomerMessage(env, userId, role, text, name) {
+  if (!userId || !text) return;
+
+  const key = messagesKey(userId);
+  const stored = await env.ORDERS_KV.get(key, 'json');
+  const items = Array.isArray(stored?.items) ? stored.items : [];
+
+  items.push({
+    role,
+    text: String(text).slice(0, 500),
+    name: String(name || '').slice(0, 80),
+    at: new Date().toISOString()
+  });
+
+  await env.ORDERS_KV.put(
+    key,
+    JSON.stringify({ items: items.slice(-30) }),
+    { expirationTtl: 90 * 24 * 60 * 60 }
+  );
+}
+
 async function notifyWatchers(env, productId, title, price) {
   const list = await env.ORDERS_KV.list({ prefix: `watch:${productId}:` });
   if (!list.keys.length) return 0;
@@ -613,6 +679,19 @@ async function handleTelegramUpdate(env, update) {
     ? text.slice(1).split(/[\s@]/)[0].toLowerCase()
     : '';
 
+  // Журнал переписки для карточки клиента в панели менеджера.
+  const sender = message.from || {};
+  const senderId = sender.id || message.chat.id;
+  if (text && senderId && !sender.is_bot) {
+    await appendCustomerMessage(
+      env,
+      senderId,
+      isManager(sender, env) ? 'manager' : 'buyer',
+      text,
+      sender.first_name || ''
+    );
+  }
+
   const openStoreKeyboard = {
     inline_keyboard: [
       [{ text: '🛍 Открыть магазин', web_app: { url: STORE_URL } }],
@@ -743,6 +822,43 @@ export default {
       return json({ ok: true, canNotify });
     }
 
+    // Синхронизация избранного: нужно, чтобы бот предупредил о снижении цены.
+    if (body.type === 'favorites') {
+      const ids = Array.isArray(body.ids)
+        ? body.ids.map(id => String(id)).filter(id => /^\d{1,12}$/.test(id)).slice(0, 50)
+        : [];
+
+      await env.ORDERS_KV.put(
+        favoritesKey(user.id),
+        JSON.stringify({
+          ids,
+          at: new Date().toISOString(),
+          name: user.first_name || '',
+          username: user.username || ''
+        })
+      );
+
+      return json({ ok: true, count: ids.length });
+    }
+
+    // Карточка клиента: избранное и переписка (только менеджер).
+    if (body.type === 'customer') {
+      if (!manager) return json({ error: 'manager_only' }, 403);
+
+      const userId = String(body.userId || '').trim();
+      if (!userId) return json({ error: 'invalid_user' }, 400);
+
+      const favorites = await env.ORDERS_KV.get(favoritesKey(userId), 'json');
+      const messages = await env.ORDERS_KV.get(messagesKey(userId), 'json');
+
+      return json({
+        userId,
+        favorites: Array.isArray(favorites?.ids) ? favorites.ids : [],
+        favoritesUpdatedAt: favorites?.at || null,
+        messages: Array.isArray(messages?.items) ? messages.items : []
+      });
+    }
+
     // Изменение наличия менеджером
     if (body.type === 'stock') {
       if (!manager) return json({ error: 'manager_only' }, 403);
@@ -781,6 +897,9 @@ export default {
         return json({ error: 'invalid_old_price' }, 400);
       }
 
+      const previous = await env.ORDERS_KV.get(productKey(productId), 'json');
+      const previousPrice = Number(previous?.price) > 0 ? Number(previous.price) : BASE_PRICES[productId];
+
       const now = new Date().toISOString();
       const product = {
         title,
@@ -800,7 +919,10 @@ export default {
         ? await notifyWatchers(env, productId, title, price)
         : 0;
 
-      return json({ product: { ...product, stock }, notified });
+      // Снижение цены — повод написать тем, у кого товар в избранном.
+      const priceDropNotified = await notifyFavoriters(env, productId, title, previousPrice, price);
+
+      return json({ product: { ...product, stock }, notified, priceDropNotified });
     }
 
     // Смена статуса менеджером

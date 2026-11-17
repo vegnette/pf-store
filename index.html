@@ -181,12 +181,20 @@
       <div class="favorites-head-text">
         <div class="favorites-kicker">PF STORE · КОЛЛЕКЦИЯ</div>
         <h1 class="favorites-title">Избранное</h1>
-        <p class="favorites-subtitle">Сохраняйте товары сердечком и отправляйте список менеджеру одним касанием.</p>
+        <p class="favorites-subtitle">Сохраняйте товары сердечком. Если цена снизится, бот напишет вам в Telegram — а список можно оформить или отправить менеджеру одним касанием.</p>
       </div>
       <span class="favorites-count" id="favoritesCount" hidden>0</span>
     </div>
 
     <p class="price-drop-hint" id="priceDropHint" hidden></p>
+
+    <div class="favorites-summary" id="favoritesSummary" hidden>
+      <div class="favorites-total"><span>Итого</span><strong id="favoritesTotal">0 ₽</strong></div>
+      <button type="button" class="favorites-buy" id="favoritesBuyBtn">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="21" r="1"></circle><circle cx="20" cy="21" r="1"></circle><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path></svg>
+        ОФОРМИТЬ ВСЁ
+      </button>
+    </div>
 
     <div class="favorites-actions" id="favoritesActions" hidden>
       <button type="button" class="favorites-send" id="sendFavoritesBtn">
@@ -266,41 +274,66 @@
       </div>
     </section>
 
-    <section class="about-section">
+    <section class="about-section" id="aboutSteps">
       <h2 class="about-section-title">Как проходит покупка</h2>
+      <p class="about-steps-hint">Нажмите на шаг — сразу откроется нужное действие.</p>
       <div class="about-steps">
-        <div class="about-step">
+        <button type="button" class="about-step" data-about-step="catalog">
           <span class="about-step-num">01</span>
           <div>
             <div class="about-step-title">Выбираете товар</div>
             <div class="about-step-text">Смотрите каталог и добавляете нужное в корзину.</div>
           </div>
-        </div>
-        <div class="about-step">
+          <span class="about-step-arrow" aria-hidden="true">›</span>
+        </button>
+        <button type="button" class="about-step" data-about-step="manager">
           <span class="about-step-num">02</span>
           <div>
             <div class="about-step-title">Согласуете детали</div>
             <div class="about-step-text">Менеджер подтверждает наличие, доставку и оплату.</div>
           </div>
-        </div>
-        <div class="about-step">
+          <span class="about-step-arrow" aria-hidden="true">›</span>
+        </button>
+        <button type="button" class="about-step" data-about-step="check">
           <span class="about-step-num">03</span>
           <div>
             <div class="about-step-title">Проверяете товар</div>
             <div class="about-step-text">Включаете, слушаете и тестируете всё перед покупкой.</div>
           </div>
-        </div>
-        <div class="about-step">
+          <span class="about-step-arrow" aria-hidden="true">›</span>
+        </button>
+        <button type="button" class="about-step" data-about-step="warranty">
           <span class="about-step-num">04</span>
           <div>
             <div class="about-step-title">Пользуетесь с гарантией</div>
             <div class="about-step-text">Забираете покупку с подарком и гарантией 14 дней.</div>
           </div>
-        </div>
+          <span class="about-step-arrow" aria-hidden="true">›</span>
+        </button>
       </div>
     </section>
 
-    <section class="about-section">
+    <section class="about-section" id="aboutCompare">
+      <h2 class="about-section-title">Реплика 1:1 и оригинал</h2>
+      <div class="compare-wrap">
+        <table class="compare-table">
+          <thead>
+            <tr><th scope="col">Параметр</th><th scope="col">Реплика 1:1</th><th scope="col">Оригинал</th></tr>
+          </thead>
+          <tbody>
+            <tr><th scope="row">Цена</th><td>в 3–5 раз ниже</td><td>полная стоимость бренда</td></tr>
+            <tr><th scope="row">Внешний вид</th><td>копия 1:1, тот же дизайн</td><td>эталон</td></tr>
+            <tr><th scope="row">Материалы</th><td>близкие к оригиналу, есть отличия</td><td>оригинальные</td></tr>
+            <tr><th scope="row">Функции</th><td>до 95% возможностей</td><td>100%</td></tr>
+            <tr><th scope="row">Гарантия</th><td>14 дней от магазина</td><td>гарантия бренда</td></tr>
+            <tr><th scope="row">Проверка</th><td>до оплаты, при вас</td><td>по правилам продавца</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="compare-note">Мы не выдаём реплику за оригинал: менеджер заранее скажет, что это копия, и объяснит отличия.</p>
+    </section>
+
+    <section class="about-section" id="aboutTrust">
       <h2 class="about-section-title">Почему нам доверяют</h2>
       <div class="about-trust-grid">
         <div class="about-trust-card">
@@ -361,7 +394,7 @@
       <p class="about-note">Точную стоимость и срок доставки в ваш город назовёт менеджер при оформлении.</p>
     </section>
 
-    <section class="about-section">
+    <section class="about-section" id="aboutWarranty">
       <h2 class="about-section-title">Гарантия и возврат</h2>
       <div class="about-warranty">
         <div class="about-warranty-head">
@@ -521,7 +554,10 @@
       <h1 class="edit-title">Редактировать каталог</h1>
       <p class="edit-sub">Название, цена, наличие и описание. Изменения сохраняются в Cloudflare и сразу видны покупателям.</p>
     </section>
-    <div class="edit-list" id="editList"></div>
+    <div class="edit-layout">
+      <div class="edit-list" id="editList"></div>
+      <aside class="edit-preview" id="editPreview" aria-label="Превью карточки товара"></aside>
+    </div>
   </div>
 
   <div id="view-profile" style="display: none;">
@@ -754,6 +790,19 @@
         <button class="modal-close" id="closeOrders" aria-label="Закрыть заказы">✕</button>
       </div>
       <div class="orders-body" id="ordersBody"></div>
+    </div>
+  </div>
+
+  <div class="modal" id="customerModal" role="dialog" aria-modal="true" aria-labelledby="customerTitle">
+    <div class="modal-content customer-modal">
+      <div class="modal-header customer-header">
+        <div>
+          <h2 id="customerTitle">КЛИЕНТ</h2>
+          <div class="customer-subtitle" id="customerSubtitle">Карточка покупателя</div>
+        </div>
+        <button class="modal-close" id="closeCustomer" aria-label="Закрыть карточку клиента">✕</button>
+      </div>
+      <div class="customer-body" id="customerBody"></div>
     </div>
   </div>
 
